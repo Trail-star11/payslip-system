@@ -1,0 +1,1166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Payslip · Multi-Device Access</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Roboto, system-ui, sans-serif; }
+        body { background: #f4f7fc; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 1.5rem; }
+        .app-container { max-width: 1100px; width: 100%; }
+
+        .admin-lock-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(15,23,42,0.6);
+            backdrop-filter: blur(6px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 999;
+            transition: opacity 0.25s ease;
+            cursor: pointer;
+        }
+        .admin-lock-overlay.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+        .admin-lock-card {
+            background: white;
+            padding: 2.5rem 2.8rem;
+            border-radius: 48px;
+            box-shadow: 0 40px 60px -20px rgba(0,0,0,0.4);
+            max-width: 440px;
+            width: 100%;
+            text-align: center;
+            position: relative;
+            cursor: default;
+            animation: popIn 0.2s ease;
+        }
+        @keyframes popIn {
+            0% { transform: scale(0.95); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .admin-lock-card .close-btn {
+            position: absolute;
+            top: 16px;
+            right: 20px;
+            background: none;
+            border: none;
+            font-size: 1.6rem;
+            color: #94a3b8;
+            cursor: pointer;
+            transition: color 0.2s;
+            line-height: 1;
+            padding: 4px 8px;
+            border-radius: 30px;
+        }
+        .admin-lock-card .close-btn:hover {
+            color: #1e293b;
+            background: #f1f5f9;
+        }
+        .admin-lock-card i:first-of-type { font-size: 3rem; color: #1e293b; margin-bottom: 0.5rem; }
+        .admin-lock-card h2 { font-weight: 600; color: #0f172a; margin-bottom: 0.25rem; }
+        .admin-lock-card .sub { color: #475569; margin-bottom: 1.5rem; font-size: 0.9rem; }
+        .admin-lock-card input {
+            width: 100%;
+            padding: 0.8rem 1.2rem;
+            border: 1px solid #d1d9e6;
+            border-radius: 40px;
+            font-size: 1rem;
+            margin-bottom: 1rem;
+            background: #fafcff;
+        }
+        .admin-lock-card input:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,0.15); }
+        .admin-lock-card .btn {
+            background: #1e293b;
+            color: white;
+            border: none;
+            padding: 0.8rem 2rem;
+            border-radius: 40px;
+            font-weight: 600;
+            width: 100%;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        .admin-lock-card .btn:hover { background: #0f172a; }
+        .admin-lock-card .error-msg {
+            color: #dc2626;
+            font-size: 0.85rem;
+            margin-top: 0.5rem;
+            min-height: 1.5rem;
+        }
+        .admin-lock-card .hint {
+            font-size: 0.75rem;
+            color: #94a3b8;
+            margin-top: 0.8rem;
+            border-top: 1px solid #e2e8f0;
+            padding-top: 0.8rem;
+        }
+
+        .tabs { display: flex; gap: 0.5rem; margin-bottom: 2rem; flex-wrap: wrap; justify-content: center; }
+        .tab-btn { background: white; border: none; padding: 0.75rem 2rem; border-radius: 40px; font-weight: 600; font-size: 1rem; color: #1e293b; box-shadow: 0 4px 8px rgba(0,0,0,0.02); cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; gap: 0.6rem; border: 1px solid #e2e8f0; }
+        .tab-btn i { color: #3b82f6; }
+        .tab-btn.active { background: #1e293b; color: white; border-color: #1e293b; box-shadow: 0 8px 16px -6px rgba(30, 41, 59, 0.25); }
+        .tab-btn.active i { color: white; }
+        .tab-btn:hover:not(.active) { background: #f1f5f9; }
+
+        .tab-btn.admin-tab {
+            display: none;
+        }
+        .tab-btn.admin-tab.visible {
+            display: inline-flex;
+        }
+
+        .admin-toggle-link {
+            position: fixed;
+            bottom: 20px;
+            right: 24px;
+            background: white;
+            padding: 8px 14px;
+            border-radius: 40px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+            border: 1px solid #e2e8f0;
+            font-size: 0.8rem;
+            color: #64748b;
+            cursor: pointer;
+            transition: all 0.2s;
+            z-index: 50;
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            user-select: none;
+        }
+        .admin-toggle-link:hover {
+            background: #f1f5f9;
+            color: #1e293b;
+            border-color: #94a3b8;
+        }
+        .admin-toggle-link i {
+            color: #3b82f6;
+            font-size: 0.9rem;
+        }
+        .admin-toggle-link .lock-badge {
+            font-size: 0.6rem;
+            color: #94a3b8;
+            margin-left: 0.2rem;
+        }
+
+        .panel { display: none; background: white; border-radius: 32px; padding: 2rem 2.2rem; box-shadow: 0 20px 40px -12px rgba(0,0,0,0.08); border: 1px solid rgba(255,255,255,0.5); }
+        .panel.active { display: block; }
+        .panel h2 { font-size: 1.7rem; font-weight: 600; color: #0f172a; margin-bottom: 0.25rem; display: flex; align-items: center; gap: 0.5rem; }
+        .panel .subhead { color: #475569; margin-bottom: 1.75rem; font-size: 0.95rem; border-left: 4px solid #3b82f6; padding-left: 1rem; }
+        .upload-section { background: #f8fafc; padding: 1.5rem; border-radius: 24px; border: 1px solid #e2e8f0; }
+        .upload-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 1rem; }
+        @media (max-width: 768px) { .upload-grid { grid-template-columns: 1fr; } }
+        .upload-box { border: 2px dashed #94a3b8; border-radius: 20px; padding: 1.5rem; text-align: center; cursor: pointer; transition: all 0.3s; background: #fafcff; position: relative; }
+        .upload-box:hover { border-color: #3b82f6; background: #f0f7ff; }
+        .upload-box input[type="file"] { position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+        .upload-box .icon { font-size: 2rem; color: #3b82f6; margin-bottom: 0.5rem; display: block; }
+        .upload-box .label { font-weight: 600; color: #1e293b; }
+        .upload-box .hint { font-size: 0.8rem; color: #64748b; margin-top: 0.3rem; }
+        .upload-box.has-file { border-color: #16a34a; background: #f0fdf4; }
+        .upload-box.has-file .icon { color: #16a34a; }
+        .file-name { font-size: 0.85rem; color: #16a34a; font-weight: 500; margin-top: 0.3rem; word-break: break-all; }
+        .file-list { margin-top: 0.5rem; max-height: 100px; overflow-y: auto; text-align: left; font-size: 0.8rem; color: #475569; }
+        .file-list-item { padding: 0.2rem 0; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; }
+        .file-list-item .remove-file { color: #dc2626; cursor: pointer; font-size: 0.7rem; padding: 0.1rem 0.4rem; border-radius: 12px; background: #fef2f2; border: none; }
+        .file-list-item .remove-file:hover { background: #fecaca; }
+        .form-group { margin-bottom: 1.5rem; }
+        label { display: block; font-weight: 500; color: #1e293b; margin-bottom: 0.4rem; font-size: 0.9rem; }
+        label i { margin-right: 0.4rem; color: #3b82f6; width: 1.2rem; }
+        input { width: 100%; padding: 0.7rem 1rem; border: 1px solid #d1d9e6; border-radius: 16px; font-size: 0.95rem; background: #fafcff; transition: 0.15s; }
+        input:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,0.15); background: white; }
+        .btn { background: #1e293b; color: white; border: none; padding: 0.7rem 2rem; border-radius: 40px; font-weight: 600; font-size: 0.95rem; display: inline-flex; align-items: center; gap: 0.6rem; cursor: pointer; transition: 0.2s; box-shadow: 0 4px 8px rgba(0,0,0,0.02); }
+        .btn-primary { background: #2563eb; }
+        .btn-primary:hover { background: #1d4ed8; transform: scale(1.01); box-shadow: 0 12px 20px -10px #2563eb60; }
+        .btn-success { background: #16a34a; }
+        .btn-success:hover { background: #15803d; }
+        .btn-danger { background: #dc2626; }
+        .btn-danger:hover { background: #b91c1c; }
+        .btn-outline { background: transparent; color: #1e293b; border: 1px solid #cbd5e1; }
+        .btn-outline:hover { background: #f1f5f9; }
+        .btn-sm { padding: 0.4rem 1rem; font-size: 0.85rem; }
+        .flex-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.8rem; margin-top: 0.5rem; }
+        .flex-between { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.8rem; }
+        .status-box { background: #f1f5f9; padding: 0.9rem 1.2rem; border-radius: 20px; margin-top: 1.2rem; color: #1e293b; font-size: 0.95rem; border-left: 4px solid #3b82f6; white-space: pre-wrap; word-break: break-word; }
+        .status-box i { margin-right: 0.5rem; }
+        .status-box.error { border-left-color: #dc2626; background: #fef2f2; }
+        .status-box.success { border-left-color: #16a34a; background: #f0fdf4; }
+        .status-box.warning { border-left-color: #f59e0b; background: #fffbeb; }
+        .dummy-password-display { background: #fef3c7; border: 2px dashed #f59e0b; border-radius: 16px; padding: 0.8rem 1.2rem; margin: 0.8rem 0; display: none; align-items: center; gap: 1rem; flex-wrap: wrap; }
+        .dummy-password-display.show { display: flex; }
+        .dummy-password-display .password-code { font-size: 1.8rem; font-weight: 700; color: #92400e; font-family: 'Courier New', monospace; letter-spacing: 4px; background: white; padding: 0.2rem 1rem; border-radius: 12px; border: 1px solid #f59e0b; }
+        .payslip-download { background: #ecfdf5; border: 1px solid #bbf7d0; border-radius: 24px; padding: 1.2rem 1.8rem; margin-top: 1.5rem; display: none; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem; }
+        .payslip-download.show { display: flex; }
+        .payslip-download .info { display: flex; align-items: center; gap: 0.8rem; flex: 1; }
+        .payslip-download .info i { font-size: 2rem; color: #16a34a; }
+        .payslip-download .file-info { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: #475569; }
+        .employee-list { max-height: 500px; overflow-y: auto; background: #f8fafc; border-radius: 16px; border: 1px solid #e2e8f0; margin-top: 0.5rem; }
+        .employee-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+        .employee-table th { background: #e2e8f0; padding: 0.6rem 1rem; text-align: left; font-weight: 600; color: #1e293b; position: sticky; top: 0; z-index: 1; }
+        .employee-table td { padding: 0.5rem 1rem; border-bottom: 1px solid #e2e8f0; }
+        .employee-table tr:hover td { background: #f1f5f9; }
+        .employee-table .badge { display: inline-block; padding: 0.15rem 0.6rem; border-radius: 20px; font-size: 0.7rem; font-weight: 600; }
+        .badge-page { background: #3b82f6; color: white; }
+        .badge-pass-yes { background: #16a34a; color: white; }
+        .badge-pass-no { background: #94a3b8; color: white; }
+        .badge-not-found { background: #f59e0b; color: #1e293b; }
+        .badge-test-on { background: #f59e0b; color: #1e293b; }
+        .badge-test-off { background: #64748b; color: white; }
+        .small-note { font-size: 0.8rem; color: #64748b; margin-top: 0.3rem; }
+        .info-box { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 12px; padding: 1rem; margin: 0.5rem 0; }
+        .info-box i { color: #2563eb; margin-right: 0.5rem; }
+        .toggle-label { display: inline-flex; align-items: center; gap: 0.5rem; cursor: pointer; font-weight: 500; color: #1e293b; }
+        .toggle-label input[type="checkbox"] { width: 1.2rem; height: 1.2rem; cursor: pointer; }
+        .progress-bar { width: 100%; height: 8px; background: #e2e8f0; border-radius: 4px; margin: 0.5rem 0; overflow: hidden; }
+        .progress-bar .fill { height: 100%; background: #2563eb; border-radius: 4px; transition: width 0.3s; width: 0%; }
+        .action-bar { display: flex; flex-wrap: wrap; gap: 0.8rem; margin-top: 1rem; }
+        .table-container { overflow-x: auto; }
+        .settings-section { background: #f8fafc; padding: 1rem 1.5rem; border-radius: 16px; border: 1px solid #e2e8f0; margin-top: 1rem; }
+        .pdf-count-badge { background: #2563eb; color: white; padding: 0.1rem 0.6rem; border-radius: 12px; font-size: 0.7rem; margin-left: 0.5rem; }
+        .refresh-indicator { 
+            display: inline-block; 
+            font-size: 0.8rem; 
+            color: #64748b; 
+            margin-left: 1rem;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0% { opacity: 0.6; }
+            50% { opacity: 1; }
+            100% { opacity: 0.6; }
+        }
+        @media (max-width: 600px) { .panel { padding: 1.5rem; } .tab-btn { padding: 0.5rem 1.2rem; font-size: 0.9rem; } .payslip-download { flex-direction: column; align-items: stretch; } .employee-table { font-size: 0.8rem; } .employee-table th, .employee-table td { padding: 0.4rem 0.6rem; } .flex-between { flex-direction: column; align-items: stretch; } .dummy-password-display { flex-direction: column; align-items: stretch; text-align: center; } .action-bar { flex-direction: column; } .admin-lock-card { padding: 1.8rem 1.5rem; } }
+    </style>
+</head>
+<body>
+<div class="app-container">
+
+    <div id="adminLockOverlay" class="admin-lock-overlay hidden">
+        <div class="admin-lock-card" id="adminLockCard">
+            <button class="close-btn" id="adminLockCloseBtn" aria-label="Close">&times;</button>
+            <div style="margin-top: 0.4rem;">
+                <i class="fas fa-lock"></i>
+                <h2>Admin Access</h2>
+                <div class="sub">Enter the admin password to manage payslips</div>
+                <input type="password" id="adminPasswordInput" placeholder="Enter admin password" autocomplete="off" />
+                <button class="btn" id="adminUnlockBtn"><i class="fas fa-unlock-alt"></i> Unlock</button>
+                <div id="adminLockError" class="error-msg"></div>
+                <div class="hint"><i class="fas fa-key"></i> Default password: <strong>admin123</strong></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="adminToggleLink" class="admin-toggle-link">
+        <i class="fas fa-cog"></i> Admin <span class="lock-badge"><i class="fas fa-lock"></i></span>
+    </div>
+
+    <div class="tabs">
+        <button class="tab-btn active" data-tab="tab-user"><i class="fas fa-user"></i> Employee</button>
+        <button class="tab-btn admin-tab" data-tab="tab-admin"><i class="fas fa-user-shield"></i> Admin <i class="fas fa-lock lock-icon"></i></button>
+    </div>
+
+    <div id="tab-admin" class="panel">
+        <h2><i class="fas fa-upload" style="color:#2563eb;"></i> Upload Payslip Data</h2>
+        <div class="subhead">Upload CSV (empId, name, password) and PDF files. System matches Employee IDs to PDF pages.</div>
+
+        <div class="upload-section">
+            <div class="upload-grid">
+                <div class="upload-box" id="csvUploadBox">
+                    <input type="file" id="csvFileInput" accept=".csv" />
+                    <span class="icon"><i class="fas fa-file-csv"></i></span>
+                    <div class="label">Upload CSV</div>
+                    <div class="hint">empId, name, password</div>
+                    <div class="file-name" id="csvFileName"></div>
+                </div>
+                <div class="upload-box" id="pdfUploadBox">
+                    <input type="file" id="pdfFileInput" accept=".pdf" multiple />
+                    <span class="icon"><i class="fas fa-file-pdf"></i></span>
+                    <div class="label">Upload PDFs <span class="pdf-count-badge" id="pdfCount">0</span></div>
+                    <div class="hint">Select multiple PDF files (one payslip per page)</div>
+                    <div class="file-name" id="pdfFileName"></div>
+                    <div class="file-list" id="pdfFileList"></div>
+                </div>
+            </div>
+
+            <div class="action-bar">
+                <button class="btn btn-primary" id="processDataBtn"><i class="fas fa-cog"></i> Scan & Process All PDFs</button>
+                <button class="btn btn-outline" id="downloadSampleBtn"><i class="fas fa-download"></i> Download Sample CSV</button>
+                <button class="btn btn-danger btn-sm" id="clearAllData"><i class="fas fa-trash-alt"></i> Clear All</button>
+                <button class="btn btn-outline btn-sm" id="refreshDataBtn"><i class="fas fa-sync-alt"></i> Refresh Data</button>
+            </div>
+
+            <div id="progressContainer" style="display:none; margin-top: 1rem;">
+                <div class="flex-between">
+                    <span id="progressText">Processing...</span>
+                    <span id="progressPercent">0%</span>
+                </div>
+                <div class="progress-bar"><div class="fill" id="progressFill"></div></div>
+            </div>
+
+            <div id="adminStatus" class="status-box"><i class="fas fa-info-circle"></i> Upload CSV and PDF files to get started.</div>
+        </div>
+
+        <div class="settings-section">
+            <div class="flex-between">
+                <div>
+                    <h4 style="font-size: 1rem; margin-bottom: 0.2rem;"><i class="fas fa-flask" style="color: #f59e0b;"></i> Test Mode Settings</h4>
+                    <span class="small-note">When enabled, the employee panel will show a dummy password hint for testing.</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 1rem;">
+                    <span id="testModeStatus" class="badge badge-test-on">🔬 ON</span>
+                    <label class="toggle-label">
+                        <input type="checkbox" id="testModeToggle" checked />
+                        <span>Enable Test Mode</span>
+                    </label>
+                </div>
+            </div>
+            <div style="margin-top: 0.5rem;">
+                <span class="small-note"><i class="fas fa-info-circle"></i> In test mode, if no password is set, a dummy password is generated for download.</span>
+            </div>
+        </div>
+
+        <div style="margin-top: 2rem;">
+            <div class="flex-between">
+                <h3 style="font-size: 1.1rem;"><i class="fas fa-users"></i> Employee Records (<span id="employeeCount">0</span>)</h3>
+                <span class="small-note" id="recordStats"></span>
+            </div>
+            <div class="table-container">
+                <div id="employeeList" class="employee-list">
+                    <p style="color: #94a3b8; text-align: center; padding: 1rem;">No employees uploaded yet</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="tab-user" class="panel active">
+        <h2><i class="fas fa-download" style="color:#16a34a;"></i> Download My Payslip</h2>
+        <div class="subhead">Enter Employee ID and password to access your payslip.</div>
+
+        <div class="form-group">
+            <label><i class="fas fa-id-badge"></i> Employee ID</label>
+            <input type="text" id="userEmpId" placeholder="e.g. TXIX11906" value="TXIX11906" />
+        </div>
+        <div class="form-group">
+            <label><i class="fas fa-lock"></i> Password</label>
+            <input type="password" id="userPassword" placeholder="Enter your password" />
+        </div>
+
+        <div id="dummyPasswordDisplay" class="dummy-password-display">
+            <span class="label"><i class="fas fa-lock-open"></i> Test Mode Password Hint:</span>
+            <span class="password-code" id="dummyPasswordHint">••••••</span>
+            <span class="small-note" style="margin:0;">Use this password to login (test mode only)</span>
+        </div>
+
+        <div class="flex-row">
+            <button class="btn btn-success" id="loginWithPasswordBtn"><i class="fas fa-sign-in-alt"></i> Login & Download</button>
+            <button class="btn btn-outline" id="checkUserStatus"><i class="fas fa-search"></i> Check Record</button>
+        </div>
+
+        <div id="userStatus" class="status-box"><i class="fas fa-info-circle"></i> Enter Employee ID and password.</div>
+
+        <div id="payslipDownloadArea" class="payslip-download">
+            <div class="info">
+                <i class="fas fa-file-pdf" style="color:#dc2626;"></i>
+                <div>
+                    <strong id="payslipEmployeeName">Employee Name</strong><br />
+                    <span id="payslipEmpId" style="font-size:0.8rem; color:#475569;">EMP001</span>
+                    <div class="file-info" style="margin-top:4px;">
+                        <i class="fas fa-file-pdf"></i> <span id="payslipFileSize">PDF available</span>
+                    </div>
+                </div>
+            </div>
+            <button class="btn btn-primary" id="downloadPayslipBtn"><i class="fas fa-download"></i> Download PDF</button>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+<script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+
+<script>
+    (function() {
+        const ADMIN_PASSWORD = 'admin123';
+        const TEST_MODE_DEFAULT = true;
+        const API_BASE = '/api';
+
+        let employeeData = [];
+        let pdfDataStore = {};
+        let currentUser = null;
+        let pdfFiles = [];
+        let csvData = null;
+        let adminUnlocked = false;
+        let autoRefreshInterval = null;
+
+        const $ = id => document.getElementById(id);
+        const adminStatus = $('adminStatus');
+        const userStatus = $('userStatus');
+        const userEmpId = $('userEmpId');
+        const userPassword = $('userPassword');
+        const payslipArea = $('payslipDownloadArea');
+        const payslipEmpName = $('payslipEmployeeName');
+        const payslipEmpIdSpan = $('payslipEmpId');
+        const payslipFileSize = $('payslipFileSize');
+        const downloadBtn = $('downloadPayslipBtn');
+        const employeeList = $('employeeList');
+        const employeeCount = $('employeeCount');
+        const recordStats = $('recordStats');
+        const dummyPasswordDisplay = $('dummyPasswordDisplay');
+        const dummyPasswordHint = $('dummyPasswordHint');
+        const testModeToggle = $('testModeToggle');
+        const testModeStatus = $('testModeStatus');
+        const progressContainer = $('progressContainer');
+        const progressFill = $('progressFill');
+        const progressText = $('progressText');
+        const progressPercent = $('progressPercent');
+        const csvFileName = $('csvFileName');
+        const pdfFileName = $('pdfFileName');
+        const pdfFileList = $('pdfFileList');
+        const pdfCount = $('pdfCount');
+        const csvUploadBox = $('csvUploadBox');
+        const pdfUploadBox = $('pdfUploadBox');
+        const adminLockOverlay = $('adminLockOverlay');
+        const adminPasswordInput = $('adminPasswordInput');
+        const adminUnlockBtn = $('adminUnlockBtn');
+        const adminLockError = $('adminLockError');
+        const adminToggleLink = $('adminToggleLink');
+        const adminTabBtn = document.querySelector('.admin-tab');
+        const userTabBtn = document.querySelector('[data-tab="tab-user"]');
+        const adminLockCloseBtn = $('adminLockCloseBtn');
+        const adminLockCard = $('adminLockCard');
+
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+
+        // ---------- API CALLS ----------
+        async function apiCall(endpoint, options = {}) {
+    const url = `${API_BASE}${endpoint}`;
+    console.log('📡 API Call:', url);
+    
+    const response = await fetch(url, {
+        ...options,
+        headers: {
+            'Content-Type': 'application/json',
+            ...options.headers
+        }
+    });
+    
+    if (!response.ok) {
+        const error = await response.text();
+        throw new Error(error || 'API call failed');
+    }
+    return response.json();
+}
+
+        async function loadDataFromServer() {
+            try {
+                const data = await apiCall('/data');
+                if (data && data.employees) {
+                    employeeData = data.employees;
+                    // Load PDF data from server
+                    if (data.pdfs) {
+                        pdfDataStore = {};
+                        for (const [filename, pdfData] of Object.entries(data.pdfs)) {
+                            if (pdfData.bytes) {
+                                const binaryString = atob(pdfData.bytes);
+                                const bytes = new Uint8Array(binaryString.length);
+                                for (let i = 0; i < binaryString.length; i++) {
+                                    bytes[i] = binaryString.charCodeAt(i);
+                                }
+                                pdfDataStore[filename] = {
+                                    bytes: bytes.buffer,
+                                    pages: pdfData.pages || 0
+                                };
+                            }
+                        }
+                    }
+                    renderEmployeeList();
+                    setAdminMsg(`✅ Loaded ${employeeData.length} employee records from server.`, 'success');
+                    return true;
+                }
+                return false;
+            } catch (error) {
+                console.error('Error loading data:', error);
+                setAdminMsg('⚠️ Could not connect to server. Make sure the server is running.', 'error');
+                return false;
+            }
+        }
+
+        async function saveDataToServer(employees, pdfs = null) {
+            try {
+                const data = { employees };
+                if (pdfs) {
+                    data.pdfs = {};
+                    for (const [filename, pdfData] of Object.entries(pdfs)) {
+                        const bytes = new Uint8Array(pdfData.bytes);
+                        let binary = '';
+                        for (let i = 0; i < bytes.length; i++) {
+                            binary += String.fromCharCode(bytes[i]);
+                        }
+                        data.pdfs[filename] = {
+                            bytes: btoa(binary),
+                            pages: pdfData.pages || 0
+                        };
+                    }
+                }
+                await apiCall('/data', {
+                    method: 'POST',
+                    body: JSON.stringify(data)
+                });
+                return true;
+            } catch (error) {
+                console.error('Error saving data:', error);
+                setAdminMsg('⚠️ Could not save data to server.', 'error');
+                return false;
+            }
+        }
+
+        // ---------- AUTO REFRESH ----------
+        function startAutoRefresh() {
+            if (autoRefreshInterval) clearInterval(autoRefreshInterval);
+            autoRefreshInterval = setInterval(async () => {
+                if (document.hidden) return; // Don't refresh if tab is hidden
+                try {
+                    const data = await apiCall('/data');
+                    if (data && data.employees) {
+                        // Check if data has changed
+                        const currentIds = employeeData.map(e => e.empId).sort().join(',');
+                        const newIds = data.employees.map(e => e.empId).sort().join(',');
+                        if (currentIds !== newIds) {
+                            employeeData = data.employees;
+                            renderEmployeeList();
+                            if (adminUnlocked) {
+                                setAdminMsg('🔄 Data updated from server', 'warning');
+                            }
+                        }
+                    }
+                } catch (error) {
+                    // Silently fail - don't show errors for auto-refresh
+                }
+            }, 5000); // Refresh every 5 seconds
+        }
+
+        // ---------- ADMIN LOCK ----------
+        function lockAdmin() {
+            adminUnlocked = false;
+            adminLockOverlay.classList.remove('hidden');
+            adminPasswordInput.value = '';
+            adminLockError.textContent = '';
+            if (adminTabBtn) {
+                adminTabBtn.classList.remove('visible');
+                document.querySelector('.admin-tab .lock-icon').style.color = '#94a3b8';
+            }
+            if (adminTabBtn && adminTabBtn.classList.contains('active')) {
+                adminTabBtn.classList.remove('active');
+                userTabBtn.classList.add('active');
+                document.getElementById('tab-admin').classList.remove('active');
+                document.getElementById('tab-user').classList.add('active');
+            }
+            setTimeout(() => adminPasswordInput.focus(), 100);
+        }
+
+        function unlockAdmin() {
+            adminUnlocked = true;
+            adminLockOverlay.classList.add('hidden');
+            if (adminTabBtn) {
+                adminTabBtn.classList.add('visible');
+                document.querySelector('.admin-tab .lock-icon').style.color = '#16a34a';
+            }
+            setAdminMsg('🔓 Admin panel unlocked. You can now manage payslips.', 'success');
+            if (adminTabBtn) adminTabBtn.click();
+            loadDataFromServer();
+        }
+
+        function closeAdminLock() {
+            adminLockOverlay.classList.add('hidden');
+            if (!adminUnlocked) {
+                if (adminTabBtn) adminTabBtn.classList.remove('visible');
+            }
+        }
+
+        adminLockCloseBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            closeAdminLock();
+        });
+
+        adminLockOverlay.addEventListener('click', function(e) {
+            if (e.target === adminLockOverlay) {
+                closeAdminLock();
+            }
+        });
+
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape' && !adminLockOverlay.classList.contains('hidden')) {
+                closeAdminLock();
+            }
+        });
+
+        adminUnlockBtn.addEventListener('click', function() {
+            const pass = adminPasswordInput.value.trim();
+            if (pass === ADMIN_PASSWORD) {
+                unlockAdmin();
+            } else {
+                adminLockError.textContent = '❌ Incorrect password. Try again.';
+                adminPasswordInput.value = '';
+                adminPasswordInput.focus();
+            }
+        });
+
+        adminPasswordInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') adminUnlockBtn.click();
+        });
+
+        adminToggleLink.addEventListener('click', function() {
+            if (adminUnlocked) {
+                if (adminTabBtn) adminTabBtn.click();
+            } else {
+                adminLockOverlay.classList.remove('hidden');
+                setTimeout(() => adminPasswordInput.focus(), 100);
+            }
+        });
+
+        // ---------- HELPERS ----------
+        function findEmployee(empId) {
+            return employeeData.find(e => e.empId.toLowerCase() === empId.toLowerCase()) || null;
+        }
+
+        function setAdminMsg(msg, type = '') {
+            adminStatus.innerHTML = `<i class="fas ${type === 'error' ? 'fa-exclamation-triangle' : type === 'success' ? 'fa-check-circle' : 'fa-info-circle'}"></i> ${msg}`;
+            adminStatus.className = 'status-box';
+            if (type) adminStatus.classList.add(type);
+        }
+
+        function setUserMsg(msg, type = '') {
+            userStatus.innerHTML = `<i class="fas ${type === 'error' ? 'fa-exclamation-triangle' : type === 'success' ? 'fa-check-circle' : 'fa-info-circle'}"></i> ${msg}`;
+            userStatus.className = 'status-box';
+            if (type) userStatus.classList.add(type);
+        }
+
+        function updateTestModeStatus() {
+            if (testModeToggle.checked) {
+                testModeStatus.textContent = '🔬 ON';
+                testModeStatus.className = 'badge badge-test-on';
+                dummyPasswordDisplay.classList.add('show');
+                if (adminUnlocked) setAdminMsg('🔬 Test Mode is ENABLED. Password hints will be shown in Employee panel.', 'warning');
+            } else {
+                testModeStatus.textContent = '🔒 OFF';
+                testModeStatus.className = 'badge badge-test-off';
+                dummyPasswordDisplay.classList.remove('show');
+                if (adminUnlocked) setAdminMsg('🔒 Test Mode is DISABLED. Employees must know their password.', '');
+            }
+        }
+
+        function formatSize(bytes) {
+            if (!bytes) return 'Unknown size';
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / 1048576).toFixed(1) + ' MB';
+        }
+
+        function updateDummyPasswordHint(user) {
+            if (user && testModeToggle.checked) {
+                const pass = user.password || 'dummy123';
+                dummyPasswordHint.textContent = pass;
+                dummyPasswordDisplay.classList.add('show');
+            } else {
+                dummyPasswordDisplay.classList.remove('show');
+            }
+        }
+
+        // ---------- EXTRACT FUNCTIONS ----------
+        function extractName(text) {
+            const patterns = [
+                /Name of the Employee[:.\s]*([A-Z\s]+?)(?=\s+No of Days|\s+Emp Code|\s+Aadhaar|\s+Designation|$)/i,
+                /Employee Name[:.\s]*([A-Z\s]+?)(?=\s+No of Days|\s+Emp Code|\s+Aadhaar|\s+Designation|$)/i,
+                /Name[:.\s]*([A-Z\s]+?)(?=\s+No of Days|\s+Emp Code|\s+Aadhaar|\s+Designation|$)/i,
+            ];
+            for (const pattern of patterns) {
+                const match = text.match(pattern);
+                if (match) {
+                    let name = match[1].trim();
+                    name = name.replace(/\s+No of Days.*$/i, '').replace(/\s+Emp Code.*$/i, '').replace(/\s+Aadhaar.*$/i, '').replace(/\s+Designation.*$/i, '');
+                    name = name.replace(/[^A-Za-z\s\.]/g, '');
+                    if (name.length > 1) return name.trim();
+                }
+            }
+            const fallbackMatch = text.match(/^([A-Z\s]+?)(?=\s+No of Days|\s+Emp Code)/i);
+            if (fallbackMatch) {
+                let name = fallbackMatch[1].trim();
+                name = name.replace(/[^A-Za-z\s\.]/g, '');
+                if (name.length > 1) return name.trim();
+            }
+            return null;
+        }
+
+        function extractEmpId(text) {
+            const patterns = [
+                /Emp Code[:.\s]*([A-Z0-9\/]+)/i,
+                /Employee Code[:.\s]*([A-Z0-9\/]+)/i,
+                /EmpID[:.\s]*([A-Z0-9\/]+)/i,
+                /Emp Id[:.\s]*([A-Z0-9\/]+)/i,
+            ];
+            for (const pattern of patterns) {
+                const match = text.match(pattern);
+                if (match) {
+                    let id = match[1].trim().replace(/[^A-Z0-9\/]/g, '');
+                    if (id.length > 3) return id;
+                }
+            }
+            const fallback = [/\b(T1UB[0-9]+)\b/i, /\b(TXIX[0-9]+)\b/i, /\b(TXI\/X[0-9]+)\b/i, /\b([A-Z]{1,4}[0-9\/]{4,})\b/i];
+            for (const pattern of fallback) {
+                const match = text.match(pattern);
+                if (match) {
+                    let id = match[1].trim().replace(/[^A-Z0-9\/]/g, '');
+                    if (id.length > 3) return id;
+                }
+            }
+            return null;
+        }
+
+        // ---------- RENDER ----------
+        function renderEmployeeList() {
+            employeeCount.textContent = employeeData.length;
+            const withPdf = employeeData.filter(e => e.pageNumber).length;
+            const withPass = employeeData.filter(e => e.password && e.password.length > 0).length;
+            recordStats.textContent = `📊 ${withPdf} with PDF | ${withPass} with password`;
+
+            if (employeeData.length === 0) {
+                employeeList.innerHTML = '<p style="color: #94a3b8; text-align: center; padding: 1rem;">No employees uploaded yet</p>';
+                return;
+            }
+
+            let html = `<table class="employee-table"><thead><tr><th>Emp ID</th><th>Name</th><th>PDF Found</th><th>Password</th></tr></thead><tbody>`;
+            employeeData.forEach(emp => {
+                const pdfStatus = emp.pageNumber ? `<span class="badge badge-page">Page ${emp.pageNumber}${emp.pdfFile ? ' (' + emp.pdfFile + ')' : ''}</span>` : `<span class="badge badge-not-found">Not found</span>`;
+                const passStatus = emp.password && emp.password.length > 0 ? `<span class="badge badge-pass-yes">✅ Available</span>` : `<span class="badge badge-pass-no">❌ Not set</span>`;
+                html += `<tr><td><strong>${emp.empId}</strong></td><td>${emp.name || 'N/A'}</td><td>${pdfStatus}</td><td>${passStatus}</td></tr>`;
+            });
+            html += '</tbody></table>';
+            employeeList.innerHTML = html;
+        }
+
+        function updatePdfFileList() {
+            if (pdfFiles.length === 0) {
+                pdfFileList.innerHTML = '';
+                pdfCount.textContent = '0';
+                pdfFileName.textContent = '';
+                pdfUploadBox.classList.remove('has-file');
+                return;
+            }
+            pdfCount.textContent = pdfFiles.length;
+            pdfFileName.textContent = `📄 ${pdfFiles.length} PDF(s) selected`;
+            pdfUploadBox.classList.add('has-file');
+
+            let html = '';
+            pdfFiles.forEach((file, index) => {
+                html += `<div class="file-list-item"><span>${file.name} (${formatSize(file.size)})</span><button class="remove-file" data-index="${index}">✕</button></div>`;
+            });
+            pdfFileList.innerHTML = html;
+
+            document.querySelectorAll('.remove-file').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    const index = parseInt(this.dataset.index);
+                    pdfFiles.splice(index, 1);
+                    updatePdfFileList();
+                    $('pdfFileInput').value = '';
+                });
+            });
+        }
+
+        // ---------- EXTRACT PAGE FROM PDF ----------
+        async function extractPageFromPdf(filename, pageNumber) {
+            const pdfData = pdfDataStore[filename];
+            if (!pdfData) throw new Error(`PDF '${filename}' not found`);
+            try {
+                const pdfDoc = await PDFLib.PDFDocument.load(pdfData.bytes);
+                const newPdfDoc = await PDFLib.PDFDocument.create();
+                const [copiedPage] = await newPdfDoc.copyPages(pdfDoc, [pageNumber - 1]);
+                newPdfDoc.addPage(copiedPage);
+                return await newPdfDoc.save();
+            } catch(err) {
+                throw new Error('Could not extract page: ' + err.message);
+            }
+        }
+
+        // ---------- PROCESS DATA ----------
+        $('processDataBtn').addEventListener('click', async function() {
+            if (!adminUnlocked) { lockAdmin(); return; }
+            if (!csvData && pdfFiles.length === 0) {
+                setAdminMsg('Please upload a CSV file or at least one PDF file.', 'error');
+                return;
+            }
+
+            progressContainer.style.display = 'block';
+            progressFill.style.width = '0%';
+            progressPercent.textContent = '0%';
+            progressText.textContent = 'Starting...';
+
+            try {
+                let csvEmployees = [];
+                if (csvData) {
+                    progressText.textContent = 'Reading CSV...';
+                    const csvText = await csvData.text();
+                    const lines = csvText.split('\n').filter(line => line.trim() !== '');
+                    if (lines.length > 1) {
+                        const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+                        const empIdx = headers.indexOf('empid');
+                        const nameIdx = headers.indexOf('name');
+                        const passIdx = headers.indexOf('password');
+                        if (empIdx !== -1 && nameIdx !== -1) {
+                            for (let i = 1; i < lines.length; i++) {
+                                const cols = lines[i].split(',').map(c => c.trim());
+                                if (cols.length > Math.max(empIdx, nameIdx)) {
+                                    csvEmployees.push({
+                                        empId: cols[empIdx].trim(),
+                                        name: cols[nameIdx].trim(),
+                                        password: passIdx !== -1 && cols.length > passIdx ? cols[passIdx].trim() : ''
+                                    });
+                                }
+                            }
+                        } else {
+                            setAdminMsg('CSV must have empId, name, password columns.', 'error');
+                            progressContainer.style.display = 'none';
+                            return;
+                        }
+                    }
+                    progressFill.style.width = '10%';
+                    progressPercent.textContent = '10%';
+                }
+
+                let allPdfEmployees = [];
+                let totalPages = 0;
+                let processedPages = 0;
+
+                if (pdfFiles.length > 0) {
+                    progressText.textContent = `Processing ${pdfFiles.length} PDF(s)...`;
+                    for (let p = 0; p < pdfFiles.length; p++) {
+                        const pdfFile = pdfFiles[p];
+                        progressText.textContent = `Loading PDF ${p + 1}/${pdfFiles.length}: ${pdfFile.name}...`;
+                        const arrayBuffer = await pdfFile.arrayBuffer();
+                        const pdfBytes = new Uint8Array(arrayBuffer);
+                        pdfDataStore[pdfFile.name] = { bytes: pdfBytes.buffer, pages: 0 };
+
+                        const pdf = await pdfjsLib.getDocument({ data: pdfBytes }).promise;
+                        const pageCount = pdf.numPages;
+                        pdfDataStore[pdfFile.name].pages = pageCount;
+                        totalPages += pageCount;
+
+                        progressText.textContent = `Scanning ${pdfFile.name} (${pageCount} pages)...`;
+                        for (let i = 1; i <= pageCount; i++) {
+                            const page = await pdf.getPage(i);
+                            const textContent = await page.getTextContent();
+                            const pageText = textContent.items.map(item => item.str).join(' ');
+                            const empId = extractEmpId(pageText);
+                            if (empId) {
+                                const name = extractName(pageText) || `Employee ${i}`;
+                                allPdfEmployees.push({
+                                    empId: empId,
+                                    name: name,
+                                    pageNumber: i,
+                                    pdfFile: pdfFile.name
+                                });
+                            }
+                            processedPages++;
+                            const progress = 10 + (processedPages / (totalPages || 1)) * 70;
+                            progressFill.style.width = Math.min(progress, 80) + '%';
+                            progressPercent.textContent = Math.round(Math.min(progress, 80)) + '%';
+                            progressText.textContent = `Scanning ${pdfFile.name} - Page ${i}/${pageCount}...`;
+                        }
+                    }
+                }
+
+                progressText.textContent = 'Merging data...';
+                progressFill.style.width = '85%';
+                progressPercent.textContent = '85%';
+
+                let mergedData = [];
+                if (csvEmployees.length > 0) {
+                    mergedData = csvEmployees.map(emp => {
+                        const pdfMatch = allPdfEmployees.find(p => p.empId.toLowerCase() === emp.empId.toLowerCase());
+                        return {
+                            empId: emp.empId,
+                            name: emp.name || (pdfMatch ? pdfMatch.name : ''),
+                            password: emp.password || '',
+                            pageNumber: pdfMatch ? pdfMatch.pageNumber : null,
+                            pdfFile: pdfMatch ? pdfMatch.pdfFile : null
+                        };
+                    });
+                    allPdfEmployees.forEach(pdfEmp => {
+                        if (!mergedData.find(m => m.empId.toLowerCase() === pdfEmp.empId.toLowerCase())) {
+                            mergedData.push({
+                                empId: pdfEmp.empId,
+                                name: pdfEmp.name,
+                                password: '',
+                                pageNumber: pdfEmp.pageNumber,
+                                pdfFile: pdfEmp.pdfFile
+                            });
+                        }
+                    });
+                } else {
+                    mergedData = allPdfEmployees.map(e => ({ ...e, password: '' }));
+                }
+
+                employeeData = mergedData;
+                
+                // Save to server
+                const saved = await saveDataToServer(employeeData, pdfDataStore);
+                if (!saved) {
+                    setAdminMsg('❌ Failed to save data to server. Please check server connection.', 'error');
+                    progressContainer.style.display = 'none';
+                    return;
+                }
+
+                progressFill.style.width = '100%';
+                progressPercent.textContent = '100%';
+                progressText.textContent = '✅ Complete!';
+                setAdminMsg(`✅ Successfully processed ${employeeData.length} employees from ${pdfFiles.length} PDF(s).`, 'success');
+
+                setTimeout(() => { progressContainer.style.display = 'none'; }, 2000);
+
+            } catch(err) {
+                console.error(err);
+                setAdminMsg('❌ Error processing: ' + err.message, 'error');
+                progressContainer.style.display = 'none';
+            }
+        });
+
+        // ---------- REFRESH DATA ----------
+        $('refreshDataBtn').addEventListener('click', async function() {
+            if (!adminUnlocked) { lockAdmin(); return; }
+            await loadDataFromServer();
+            setAdminMsg('🔄 Data refreshed from server.', 'success');
+        });
+
+        // ---------- DOWNLOAD SAMPLE CSV ----------
+        $('downloadSampleBtn').addEventListener('click', function() {
+            if (!adminUnlocked) { lockAdmin(); return; }
+            const csvContent = `empId,name,password
+    TXIX11906,Rizwan Khan,pass123
+    TXIX12095,NIKHIL KUMAR,nikhil@2024
+    T1UB16432,Avnish Kumar,avnish#99
+    TXIX13081,SACHIN BAISOYA,sachin!88`;
+            const blob = new Blob([csvContent], { type: 'text/csv' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = 'sample-employee-data.csv';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(link.href);
+            setAdminMsg('✅ Sample CSV downloaded successfully!', 'success');
+        });
+
+        // ---------- CLEAR ALL ----------
+        $('clearAllData').addEventListener('click', async function() {
+            if (!adminUnlocked) { lockAdmin(); return; }
+            if (confirm('⚠️ Delete all employee data? This cannot be undone.')) {
+                employeeData = [];
+                pdfDataStore = {};
+                pdfFiles = [];
+                csvData = null;
+                csvFileName.textContent = '';
+                pdfFileName.textContent = '';
+                pdfFileList.innerHTML = '';
+                pdfCount.textContent = '0';
+                csvUploadBox.classList.remove('has-file');
+                pdfUploadBox.classList.remove('has-file');
+                
+                await saveDataToServer(employeeData, {});
+                renderEmployeeList();
+                setAdminMsg('🗑️ All data cleared.');
+                currentUser = null;
+                payslipArea.classList.remove('show');
+                dummyPasswordDisplay.classList.remove('show');
+                setUserMsg('Data cleared. Please upload new data.');
+            }
+        });
+
+        // ---------- CSV + PDF FILE HANDLERS ----------
+        $('csvFileInput').addEventListener('change', function(e) {
+            if (!adminUnlocked) { lockAdmin(); return; }
+            const file = e.target.files[0];
+            if (file) {
+                csvFileName.textContent = '📄 ' + file.name;
+                csvUploadBox.classList.add('has-file');
+                csvData = file;
+            }
+        });
+
+        $('pdfFileInput').addEventListener('change', function(e) {
+            if (!adminUnlocked) { lockAdmin(); return; }
+            const files = e.target.files;
+            if (files.length > 0) {
+                for (const file of files) {
+                    if (file.type === 'application/pdf') {
+                        if (!pdfFiles.find(f => f.name === file.name && f.size === file.size)) {
+                            pdfFiles.push(file);
+                        }
+                    }
+                }
+                updatePdfFileList();
+            }
+        });
+
+        // ---------- TEST MODE TOGGLE ----------
+        testModeToggle.addEventListener('change', function() {
+            if (!adminUnlocked) { lockAdmin(); return; }
+            updateTestModeStatus();
+            payslipArea.classList.remove('show');
+            if (testModeToggle.checked) {
+                dummyPasswordDisplay.classList.add('show');
+            } else {
+                dummyPasswordDisplay.classList.remove('show');
+            }
+            if (currentUser) {
+                updateDummyPasswordHint(currentUser);
+            }
+        });
+
+        // ---------- USER: LOGIN WITH PASSWORD ----------
+        $('loginWithPasswordBtn').addEventListener('click', async function() {
+            // Refresh data before login to ensure latest data
+            await loadDataFromServer();
+            
+            const empId = userEmpId.value.trim();
+            const password = userPassword.value.trim();
+            if (!empId) { setUserMsg('Please enter Employee ID.', 'error'); return; }
+            if (!password) { setUserMsg('Please enter your password.', 'error'); return; }
+
+            const emp = findEmployee(empId);
+            if (!emp) { setUserMsg(`❌ No employee found with ID: ${empId}`, 'error'); return; }
+
+            let passOk = false;
+            if (testModeToggle.checked && (!emp.password || emp.password.length === 0)) {
+                passOk = true;
+            } else {
+                passOk = (password === emp.password);
+            }
+
+            if (!passOk) {
+                setUserMsg('❌ Incorrect password. Please try again.', 'error');
+                return;
+            }
+
+            currentUser = emp;
+            setUserMsg(`✅ Login successful! Welcome ${emp.name || emp.empId}.`, 'success');
+            await showPayslip(emp);
+            updateDummyPasswordHint(emp);
+        });
+
+        // ---------- SHOW PAYSLIP ----------
+        async function showPayslip(user) {
+            if (!user) { setUserMsg('No user data available.', 'error'); return; }
+
+            payslipEmpName.textContent = user.name || user.empId;
+            payslipEmpIdSpan.textContent = user.empId;
+
+            if (user.pageNumber && user.pdfFile && pdfDataStore[user.pdfFile]) {
+                try {
+                    setUserMsg('⏳ Extracting your payslip...');
+                    const pdfBytes = await extractPageFromPdf(user.pdfFile, user.pageNumber);
+                    const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+                    payslipArea.dataset.pdfBlobUrl = URL.createObjectURL(blob);
+                    payslipArea.dataset.pdfName = `payslip_${user.empId}.pdf`;
+                    payslipFileSize.textContent = formatSize(pdfBytes.length);
+                    payslipArea.classList.add('show');
+                    setUserMsg('✅ Payslip ready for download!', 'success');
+                } catch(err) {
+                    setUserMsg('⚠️ Could not extract payslip: ' + err.message, 'error');
+                    payslipArea.classList.remove('show');
+                }
+            } else if (user.pageNumber) {
+                setUserMsg('⚠️ PDF data not found. Please re-upload the payslip PDF.', 'error');
+                payslipArea.classList.remove('show');
+            } else {
+                setUserMsg('⚠️ No payslip found for this employee.', 'error');
+                payslipArea.classList.remove('show');
+            }
+        }
+
+        // ---------- DOWNLOAD PDF ----------
+        downloadBtn.addEventListener('click', function() {
+            const pdfBlobUrl = payslipArea.dataset.pdfBlobUrl;
+            const pdfName = payslipArea.dataset.pdfName || 'payslip.pdf';
+            if (!pdfBlobUrl) { setUserMsg('No PDF available to download.', 'error'); return; }
+            try {
+                const link = document.createElement('a');
+                link.href = pdfBlobUrl;
+                link.download = pdfName;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                setUserMsg(`✅ Downloading ${pdfName}`, 'success');
+            } catch(err) {
+                setUserMsg('❌ Error downloading: ' + err.message, 'error');
+            }
+        });
+
+        // ---------- CHECK USER STATUS ----------
+        $('checkUserStatus').addEventListener('click', async function() {
+            await loadDataFromServer();
+            const empId = userEmpId.value.trim();
+            if (!empId) { setUserMsg('Enter Employee ID.', 'error'); return; }
+            const emp = findEmployee(empId);
+            if (!emp) { setUserMsg(`No record for ${empId}`, 'error'); return; }
+            const hasPdf = emp.pageNumber ? `✅ Page ${emp.pageNumber}${emp.pdfFile ? ' (' + emp.pdfFile + ')' : ''}` : '❌ No PDF';
+            const hasPass = emp.password ? '✅ Set' : '❌ Not set';
+            setUserMsg(`✅ Found: ${emp.name} | Password: ${hasPass} | PDF: ${hasPdf}`, 'success');
+            if (testModeToggle.checked) {
+                const hint = emp.password || 'dummy123';
+                dummyPasswordHint.textContent = hint;
+                dummyPasswordDisplay.classList.add('show');
+            } else {
+                dummyPasswordDisplay.classList.remove('show');
+            }
+        });
+
+        // ---------- TAB SWITCHING ----------
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                if (this.dataset.tab === 'tab-admin' && !adminUnlocked) {
+                    lockAdmin();
+                    return;
+                }
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                this.classList.add('active');
+                const panelId = this.dataset.tab;
+                document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+                document.getElementById(panelId).classList.add('active');
+            });
+        });
+
+        // ---------- INIT ----------
+        async function init() {
+            // Start with locked state
+            adminUnlocked = false;
+            adminLockOverlay.classList.add('hidden');
+            if (adminTabBtn) adminTabBtn.classList.remove('visible');
+            adminToggleLink.style.display = 'flex';
+
+            // Load initial data
+            await loadDataFromServer();
+            
+            updateTestModeStatus();
+            
+            setAdminMsg(`📦 ${employeeData.length} employee records loaded from server. Upload CSV and/or PDFs to add data.`);
+            setUserMsg('Enter Employee ID and password to download payslip.');
+            
+            // Start auto-refresh for multi-device support
+            startAutoRefresh();
+            
+            console.log('📄 Multi-device payslip system running.');
+            console.log('🔬 Test Mode: if no password, dummy password is accepted.');
+            console.log('🔄 Auto-refresh enabled. Data syncs every 5 seconds.');
+        }
+
+        // Make sure default tab is user
+        userTabBtn.classList.add('active');
+        document.getElementById('tab-user').classList.add('active');
+        document.getElementById('tab-admin').classList.remove('active');
+
+        init();
+    })();
+</script>
+</body>
+</html>

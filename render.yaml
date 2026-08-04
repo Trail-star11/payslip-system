@@ -2,7 +2,7 @@ services:
   - type: web
     name: payslip-system
     runtime: image
-    repo: https://github.com/YOUR_USERNAME/YOUR_REPO_NAME  # Replace with your repo URL
+    repo: https://github.com/Trail-star11/payslip-system  # Replace with your repo URL
     plan: starter
     dockerfilePath: ./Dockerfile
     dockerContext: .

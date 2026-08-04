@@ -10,22 +10,80 @@ const PORT = process.env.PORT || 3000;
 
 console.log('🚀 Starting server...');
 console.log('📁 Current directory:', __dirname);
-console.log('📂 Public directory:', path.join(__dirname, 'public'));
+console.log('📂 Data directory:', DATA_DIR);
+console.log('📄 Data file:', DATA_FILE);
 
-// Ensure data directory exists
-try {
-    if (!fs.existsSync(DATA_DIR)) {
-        fs.mkdirSync(DATA_DIR, { recursive: true });
-        console.log('✅ Created data directory');
+// Ensure data directory exists with proper permissions
+function ensureDataDirectory() {
+    try {
+        // Check if we can write to the directory
+        if (!fs.existsSync(DATA_DIR)) {
+            fs.mkdirSync(DATA_DIR, { recursive: true });
+            console.log('✅ Created data directory');
+        }
+        
+        // Test write permission
+        const testFile = path.join(DATA_DIR, '.write-test');
+        fs.writeFileSync(testFile, 'test');
+        fs.unlinkSync(testFile);
+        console.log('✅ Data directory is writable');
+        
+    } catch (error) {
+        console.error('❌ Error with data directory:', error);
+        // Fallback to local directory
+        console.log('⚠️ Falling back to local data directory');
+        const localDir = path.join(__dirname, 'local-data');
+        if (!fs.existsSync(localDir)) {
+            fs.mkdirSync(localDir, { recursive: true });
+        }
+        return localDir;
     }
-    
-    if (!fs.existsSync(DATA_FILE)) {
-        const initialData = { employees: [], pdfs: {}, settings: { testMode: false } };
-        fs.writeFileSync(DATA_FILE, JSON.stringify(initialData, null, 2));
-        console.log('✅ Created data file');
+    return DATA_DIR;
+}
+
+// Initialize data directory
+const activeDataDir = ensureDataDirectory();
+const activeDataFile = path.join(activeDataDir, 'data.json');
+
+// Update DATA_FILE to use the active directory
+const FINAL_DATA_FILE = activeDataFile;
+
+console.log('📁 Using data file:', FINAL_DATA_FILE);
+
+// Initialize data file if it doesn't exist
+try {
+    if (!fs.existsSync(FINAL_DATA_FILE)) {
+        const initialData = { 
+            employees: [], 
+            pdfs: {}, 
+            settings: { testMode: false },
+            lastUpdated: new Date().toISOString()
+        };
+        fs.writeFileSync(FINAL_DATA_FILE, JSON.stringify(initialData, null, 2));
+        console.log('✅ Created new data file');
+    } else {
+        // Verify data file is valid
+        const data = fs.readFileSync(FINAL_DATA_FILE, 'utf8');
+        JSON.parse(data);
+        console.log('✅ Data file is valid');
     }
 } catch (error) {
-    console.error('❌ Error setting up data directory:', error);
+    console.error('❌ Error with data file:', error);
+    // Create backup of corrupted file
+    if (fs.existsSync(FINAL_DATA_FILE)) {
+        const backupFile = FINAL_DATA_FILE + '.backup';
+        fs.copyFileSync(FINAL_DATA_FILE, backupFile);
+        console.log(`📦 Created backup at ${backupFile}`);
+    }
+    // Create fresh file
+    const initialData = { 
+        employees: [], 
+        pdfs: {}, 
+        settings: { testMode: false },
+        lastUpdated: new Date().toISOString()
+    };
+    fs.writeFileSync(FINAL_DATA_FILE, JSON.stringify(initialData, null, 2));
+    console.log('✅ Created fresh data file');
 }
 
 // Middleware
@@ -49,13 +107,22 @@ app.use(express.static('public'));
 // API Routes
 app.get('/api/data', (req, res) => {
     try {
-        console.log('📖 Reading data from:', DATA_FILE);
-        const data = fs.readFileSync(DATA_FILE, 'utf8');
+        console.log('📖 Reading data from:', FINAL_DATA_FILE);
+        const data = fs.readFileSync(FINAL_DATA_FILE, 'utf8');
         const parsedData = JSON.parse(data);
+        
         // Ensure settings exists
         if (!parsedData.settings) {
             parsedData.settings = { testMode: false };
         }
+        
+        // Add metadata
+        parsedData._meta = {
+            lastUpdated: parsedData.lastUpdated || new Date().toISOString(),
+            recordCount: parsedData.employees ? parsedData.employees.length : 0,
+            pdfCount: parsedData.pdfs ? Object.keys(parsedData.pdfs).length : 0
+        };
+        
         res.json(parsedData);
     } catch (error) {
         console.error('❌ Error reading data:', error);
@@ -68,20 +135,34 @@ app.get('/api/data', (req, res) => {
 
 app.post('/api/data', (req, res) => {
     try {
-        console.log('💾 Saving data to:', DATA_FILE);
+        console.log('💾 Saving data to:', FINAL_DATA_FILE);
         const data = req.body;
         
         if (!data || typeof data !== 'object') {
             return res.status(400).json({ error: 'Invalid data format' });
         }
         
+        // Ensure required fields
         if (!data.employees) data.employees = [];
         if (!data.pdfs) data.pdfs = {};
         if (!data.settings) data.settings = { testMode: false };
         
-        fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+        // Add timestamp
+        data.lastUpdated = new Date().toISOString();
+        
+        // Write to a temp file first, then rename for atomic operation
+        const tempFile = FINAL_DATA_FILE + '.tmp';
+        fs.writeFileSync(tempFile, JSON.stringify(data, null, 2));
+        fs.renameSync(tempFile, FINAL_DATA_FILE);
+        
         console.log('✅ Data saved successfully');
-        res.json({ success: true, message: 'Data saved successfully' });
+        console.log(`📊 ${data.employees.length} employees, ${Object.keys(data.pdfs).length} PDFs`);
+        
+        res.json({ 
+            success: true, 
+            message: 'Data saved successfully',
+            lastUpdated: data.lastUpdated
+        });
     } catch (error) {
         console.error('❌ Error saving data:', error);
         res.status(500).json({ 
@@ -93,10 +174,23 @@ app.post('/api/data', (req, res) => {
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-    res.status(200).json({ 
-        status: 'OK', 
-        timestamp: new Date().toISOString()
-    });
+    try {
+        const stats = fs.statSync(FINAL_DATA_FILE);
+        res.status(200).json({ 
+            status: 'OK', 
+            timestamp: new Date().toISOString(),
+            dataFile: FINAL_DATA_FILE,
+            dataSize: stats.size,
+            dataExists: fs.existsSync(FINAL_DATA_FILE)
+        });
+    } catch (error) {
+        res.status(200).json({ 
+            status: 'OK', 
+            timestamp: new Date().toISOString(),
+            dataFile: FINAL_DATA_FILE,
+            error: error.message
+        });
+    }
 });
 
 // IMPORTANT: Serve index.html for root path
@@ -124,5 +218,17 @@ app.use((err, req, res, next) => {
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`✅ Server running on port ${PORT}`);
     console.log(`🌐 URL: http://localhost:${PORT}`);
-    console.log(`📁 Data directory: ${DATA_DIR}`);
+    console.log(`📁 Data directory: ${activeDataDir}`);
+    console.log(`📄 Data file: ${FINAL_DATA_FILE}`);
+    
+    // Log data file stats
+    try {
+        const stats = fs.statSync(FINAL_DATA_FILE);
+        console.log(`📊 Data file size: ${stats.size} bytes`);
+        const data = JSON.parse(fs.readFileSync(FINAL_DATA_FILE, 'utf8'));
+        console.log(`👥 Employees: ${data.employees ? data.employees.length : 0}`);
+        console.log(`📄 PDFs: ${data.pdfs ? Object.keys(data.pdfs).length : 0}`);
+    } catch (error) {
+        console.log('⚠️ Could not read data file stats');
+    }
 });

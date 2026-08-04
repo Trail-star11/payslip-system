@@ -1,21 +1,15 @@
 services:
   - type: web
     name: payslip-system
-    runtime: image
-    repo: https://github.com/Trail-star11/payslip-system  # Replace with your repo URL
-    plan: starter
-    dockerfilePath: ./Dockerfile
-    dockerContext: .
+    runtime: node
+    buildCommand: npm install
+    startCommand: node server.js
     healthCheckPath: /health
+    plan: free
     envVars:
       - key: NODE_ENV
         value: production
-      - key: DATA_DIR
-        value: /data
-      - key: PORT
-        value: 3000
-    disk:
-      name: payslip-data
-      mountPath: /data
-      sizeGB: 1
-    autoDeploy: true
+      - key: MONGODB_URI
+        value: mongodb+srv://trail_db_user:ZFjmUOMVSdatCOsq@cluster0.h1pqrer.mongodb.net/?retryWrites=true&w=majority
+      - key: DB_NAME
+        value: payslip_system

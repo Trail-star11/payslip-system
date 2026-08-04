@@ -11,7 +11,6 @@ const PORT = process.env.PORT || 3000;
 console.log('🚀 Starting server...');
 console.log('📁 Current directory:', __dirname);
 console.log('📂 Public directory:', path.join(__dirname, 'public'));
-console.log('📄 Index file:', path.join(__dirname, 'public', 'index.html'));
 
 // Ensure data directory exists
 try {
@@ -21,7 +20,7 @@ try {
     }
     
     if (!fs.existsSync(DATA_FILE)) {
-        const initialData = { employees: [], pdfs: {} };
+        const initialData = { employees: [], pdfs: {}, settings: { testMode: false } };
         fs.writeFileSync(DATA_FILE, JSON.stringify(initialData, null, 2));
         console.log('✅ Created data file');
     }
@@ -53,6 +52,10 @@ app.get('/api/data', (req, res) => {
         console.log('📖 Reading data from:', DATA_FILE);
         const data = fs.readFileSync(DATA_FILE, 'utf8');
         const parsedData = JSON.parse(data);
+        // Ensure settings exists
+        if (!parsedData.settings) {
+            parsedData.settings = { testMode: false };
+        }
         res.json(parsedData);
     } catch (error) {
         console.error('❌ Error reading data:', error);
@@ -74,6 +77,7 @@ app.post('/api/data', (req, res) => {
         
         if (!data.employees) data.employees = [];
         if (!data.pdfs) data.pdfs = {};
+        if (!data.settings) data.settings = { testMode: false };
         
         fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
         console.log('✅ Data saved successfully');

@@ -58,7 +58,18 @@ function initializeDataFile() {
             // Try to read existing data
             const content = fs.readFileSync(DATA_FILE, 'utf8');
             const data = JSON.parse(content);
+            
+            // ✅ FIX: Ensure settings exists and testMode is explicitly false
+            if (!data.settings) {
+                data.settings = { testMode: false };
+            }
+            // ✅ FIX: Explicitly ensure testMode is false if not set
+            if (data.settings.testMode === undefined || data.settings.testMode === null) {
+                data.settings.testMode = false;
+            }
+            
             console.log(`✅ Data file loaded: ${data.employees ? data.employees.length : 0} employees, ${data.pdfs ? Object.keys(data.pdfs).length : 0} PDFs`);
+            console.log(`🔒 Test Mode: ${data.settings.testMode ? 'ON' : 'OFF'}`);
             return data;
         }
     } catch (error) {
@@ -69,8 +80,18 @@ function initializeDataFile() {
             try {
                 const content = fs.readFileSync(backupFile, 'utf8');
                 const data = JSON.parse(content);
+                
+                // ✅ FIX: Ensure settings exists and testMode is explicitly false
+                if (!data.settings) {
+                    data.settings = { testMode: false };
+                }
+                if (data.settings.testMode === undefined || data.settings.testMode === null) {
+                    data.settings.testMode = false;
+                }
+                
                 fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
                 console.log('✅ Data recovered from backup');
+                console.log(`🔒 Test Mode: ${data.settings.testMode ? 'ON' : 'OFF'}`);
                 return data;
             } catch (e) {
                 console.log('❌ Backup recovery failed');
@@ -78,7 +99,7 @@ function initializeDataFile() {
         }
     }
     
-    // Create new data file
+    // ✅ FIX: Create new data file with testMode OFF
     const initialData = {
         employees: [],
         pdfs: {},
@@ -86,7 +107,8 @@ function initializeDataFile() {
         lastUpdated: new Date().toISOString()
     };
     fs.writeFileSync(DATA_FILE, JSON.stringify(initialData, null, 2));
-    console.log('✅ Created new data file');
+    console.log('✅ Created new data file with Test Mode OFF');
+    console.log('🔒 Test Mode: OFF');
     return initialData;
 }
 
@@ -96,12 +118,21 @@ let dataCache = initializeDataFile();
 // Function to save data (with multiple redundancy)
 function saveData(data) {
     try {
+        // ✅ FIX: Ensure settings exists before saving
+        if (!data.settings) {
+            data.settings = { testMode: false };
+        }
+        if (data.settings.testMode === undefined || data.settings.testMode === null) {
+            data.settings.testMode = false;
+        }
+        
         // Add timestamp
         data.lastUpdated = new Date().toISOString();
         
         // Save to primary location
         fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
         console.log('✅ Data saved to primary storage');
+        console.log(`🔒 Test Mode saved as: ${data.settings.testMode ? 'ON' : 'OFF'}`);
         
         // Save backup in same location
         const backupFile = DATA_FILE + '.backup';
@@ -153,20 +184,44 @@ app.get('/api/data', (req, res) => {
         if (fs.existsSync(DATA_FILE)) {
             const content = fs.readFileSync(DATA_FILE, 'utf8');
             const data = JSON.parse(content);
+            
+            // ✅ FIX: Ensure settings exists
+            if (!data.settings) {
+                data.settings = { testMode: false };
+            }
+            if (data.settings.testMode === undefined || data.settings.testMode === null) {
+                data.settings.testMode = false;
+            }
+            
             data._meta = {
                 lastUpdated: data.lastUpdated || new Date().toISOString(),
                 recordCount: data.employees ? data.employees.length : 0,
                 pdfCount: data.pdfs ? Object.keys(data.pdfs).length : 0,
-                storageLocation: activeDataDir
+                storageLocation: activeDataDir,
+                testMode: data.settings.testMode
             };
             dataCache = data;
             res.json(data);
         } else {
-            res.json(dataCache);
+            // ✅ FIX: Return default data with testMode OFF
+            const defaultData = {
+                employees: [],
+                pdfs: {},
+                settings: { testMode: false },
+                lastUpdated: new Date().toISOString()
+            };
+            res.json(defaultData);
         }
     } catch (error) {
         console.error('❌ Error reading data:', error);
-        res.json(dataCache);
+        // ✅ FIX: Return safe default with testMode OFF on error
+        const safeData = {
+            employees: dataCache.employees || [],
+            pdfs: dataCache.pdfs || {},
+            settings: { testMode: false },
+            lastUpdated: new Date().toISOString()
+        };
+        res.json(safeData);
     }
 });
 
@@ -177,10 +232,13 @@ app.post('/api/data', (req, res) => {
             return res.status(400).json({ error: 'Invalid data format' });
         }
         
-        // Ensure required fields
+        // ✅ FIX: Ensure required fields with testMode OFF by default
         if (!data.employees) data.employees = [];
         if (!data.pdfs) data.pdfs = {};
         if (!data.settings) data.settings = { testMode: false };
+        if (data.settings.testMode === undefined || data.settings.testMode === null) {
+            data.settings.testMode = false;
+        }
         
         // Save data
         if (saveData(data)) {
@@ -188,7 +246,8 @@ app.post('/api/data', (req, res) => {
                 success: true, 
                 message: 'Data saved successfully',
                 lastUpdated: data.lastUpdated,
-                storageLocation: activeDataDir
+                storageLocation: activeDataDir,
+                testMode: data.settings.testMode
             });
         } else {
             res.status(500).json({ error: 'Failed to save data' });
@@ -202,6 +261,7 @@ app.post('/api/data', (req, res) => {
 // Health check
 app.get('/health', (req, res) => {
     const stats = fs.existsSync(DATA_FILE) ? fs.statSync(DATA_FILE) : null;
+    const testMode = dataCache.settings ? dataCache.settings.testMode : false;
     res.json({
         status: 'OK',
         timestamp: new Date().toISOString(),
@@ -210,7 +270,8 @@ app.get('/health', (req, res) => {
         dataSize: stats ? stats.size : 0,
         recordCount: dataCache.employees ? dataCache.employees.length : 0,
         pdfCount: dataCache.pdfs ? Object.keys(dataCache.pdfs).length : 0,
-        storageLocation: activeDataDir
+        storageLocation: activeDataDir,
+        testMode: testMode
     });
 });
 
@@ -230,14 +291,15 @@ app.use((err, req, res, next) => {
     res.status(500).json({ error: 'Internal server error' });
 });
 
-// ============================================================
-// ✅ GRACEFUL SHUTDOWN - SAVES DATA BEFORE EXIT
-// ============================================================
-
+// Graceful shutdown - saves data before exit
 process.on('SIGTERM', () => {
     console.log('🔄 Received SIGTERM, saving data before shutdown...');
     if (dataCache) {
         try {
+            // ✅ FIX: Ensure settings exists
+            if (!dataCache.settings) {
+                dataCache.settings = { testMode: false };
+            }
             fs.writeFileSync(DATA_FILE, JSON.stringify(dataCache, null, 2));
             console.log('✅ Data saved before shutdown');
         } catch (error) {
@@ -251,6 +313,9 @@ process.on('SIGINT', () => {
     console.log('🔄 Received SIGINT, saving data before shutdown...');
     if (dataCache) {
         try {
+            if (!dataCache.settings) {
+                dataCache.settings = { testMode: false };
+            }
             fs.writeFileSync(DATA_FILE, JSON.stringify(dataCache, null, 2));
             console.log('✅ Data saved before shutdown');
         } catch (error) {
@@ -265,6 +330,9 @@ process.on('uncaughtException', (error) => {
     console.error('❌ Uncaught exception:', error);
     if (dataCache) {
         try {
+            if (!dataCache.settings) {
+                dataCache.settings = { testMode: false };
+            }
             fs.writeFileSync(DATA_FILE, JSON.stringify(dataCache, null, 2));
             console.log('✅ Data saved before crash');
         } catch (e) {
@@ -274,15 +342,14 @@ process.on('uncaughtException', (error) => {
     process.exit(1);
 });
 
-// ============================================================
-// START SERVER
-// ============================================================
-
+// Start server
 app.listen(PORT, '0.0.0.0', () => {
+    const testMode = dataCache.settings ? dataCache.settings.testMode : false;
     console.log(`✅ Server running on port ${PORT}`);
     console.log(`📁 Data directory: ${activeDataDir}`);
     console.log(`📄 Data file: ${DATA_FILE}`);
     console.log(`👥 Employees: ${dataCache.employees ? dataCache.employees.length : 0}`);
     console.log(`📄 PDFs: ${dataCache.pdfs ? Object.keys(dataCache.pdfs).length : 0}`);
     console.log(`📅 Last updated: ${dataCache.lastUpdated || 'Never'}`);
+    console.log(`🔒 Test Mode: ${testMode ? 'ON' : 'OFF'}`);
 });

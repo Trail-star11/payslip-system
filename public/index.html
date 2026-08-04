@@ -307,7 +307,7 @@
             <div class="flex-between">
                 <div>
                     <h4 style="font-size: 1rem; margin-bottom: 0.2rem;"><i class="fas fa-flask" style="color: #f59e0b;"></i> Test Mode Settings</h4>
-                    <span class="small-note">When enabled, employees will see a dummy password for testing purposes.</span>
+                    <span class="small-note">When enabled, employees will see a dummy password (their Employee ID) for testing purposes.</span>
                 </div>
                 <div style="display: flex; align-items: center; gap: 1rem;">
                     <span id="testModeStatus" class="badge badge-test-off">🔒 OFF</span>
@@ -318,7 +318,7 @@
                 </div>
             </div>
             <div style="margin-top: 0.5rem;">
-                <span class="small-note"><i class="fas fa-info-circle"></i> When enabled, employees can login using the dummy password shown below (for testing).</span>
+                <span class="small-note"><i class="fas fa-info-circle"></i> When enabled, employees can login using their Employee ID as the password (for testing).</span>
             </div>
         </div>
 
@@ -341,7 +341,7 @@
 
         <div class="form-group">
             <label><i class="fas fa-id-badge"></i> Employee ID</label>
-            <input type="text" id="userEmpId" placeholder="e.g. TXIX11906" />
+            <input type="text" id="userEmpId" placeholder="e.g. PPRR00476907" />
         </div>
         <div class="form-group">
             <label><i class="fas fa-lock"></i> Password</label>
@@ -349,9 +349,9 @@
         </div>
 
         <div id="dummyPasswordDisplay" class="dummy-password-display">
-            <span class="label"><i class="fas fa-lock-open"></i> Test Mode: Dummy Password</span>
+            <span class="label"><i class="fas fa-lock-open"></i> Test Mode: Use Employee ID as Password</span>
             <span class="password-code" id="dummyPasswordHint">••••••</span>
-            <span class="small-note" style="margin:0;">Use this password to login (Test Mode only)</span>
+            <span class="small-note" style="margin:0;">Your Employee ID is your password (Test Mode only)</span>
         </div>
 
         <div class="flex-row">
@@ -394,7 +394,7 @@
     let autoRefreshInterval = null;
     let isRefreshing = false;
     let dataLoaded = false;
-    let isTestModeSaved = false; // Track if test mode is saved
+    let isTestModeSaved = false;
 
     const $ = id => document.getElementById(id);
     const adminStatus = $('adminStatus');
@@ -586,11 +586,10 @@
         if (autoRefreshInterval) clearInterval(autoRefreshInterval);
         autoRefreshInterval = setInterval(async () => {
             if (document.hidden) return;
-            // Don't override test mode if it was just changed
             if (!isTestModeSaved) {
                 await loadDataFromServer();
             }
-        }, 10000); // Refresh every 10 seconds
+        }, 10000);
     }
 
     // ---------- ADMIN LOCK ----------
@@ -696,9 +695,8 @@
             testModeStatus.textContent = '🔬 ON';
             testModeStatus.className = 'badge badge-test-on';
             if (adminUnlocked) {
-                setAdminMsg('🔬 Test Mode ENABLED. Dummy passwords will be shown in Employee panel.', 'warning');
+                setAdminMsg('🔬 Test Mode ENABLED. Employees can use their Employee ID as password.', 'warning');
             }
-            // Show dummy password if a user is loaded or ID is entered
             const empId = userEmpId.value.trim();
             if (empId) {
                 const emp = findEmployee(empId);
@@ -725,22 +723,20 @@
         return (bytes / 1048576).toFixed(1) + ' MB';
     }
 
+    // DUMMY PASSWORD = EMPLOYEE ID (no extra characters)
     function getDummyPassword(emp) {
         if (emp && emp.empId) {
-            return emp.empId.toLowerCase() + '123';
+            return emp.empId; // Password is exactly the Employee ID
         }
         return 'dummy123';
     }
 
-    // Show dummy password whenever Test Mode is ON
     function updateDummyPasswordHint(user) {
-        // Only show if Test Mode is ON
         if (!testModeToggle.checked) {
             dummyPasswordDisplay.classList.remove('show');
             return;
         }
         
-        // Show dummy password for ANY user when test mode is ON
         if (user && user.empId) {
             const dummyPass = getDummyPassword(user);
             dummyPasswordHint.textContent = dummyPass;
@@ -929,7 +925,6 @@
                     const arrayBuffer = await pdfFile.arrayBuffer();
                     const pdfBytes = new Uint8Array(arrayBuffer);
                     
-                    // Store PDF data
                     pdfDataStore[pdfFile.name] = { bytes: pdfBytes.buffer, pages: 0 };
 
                     const pdf = await pdfjsLib.getDocument({ data: pdfBytes }).promise;
@@ -995,7 +990,6 @@
 
             employeeData = mergedData;
             
-            // Save to server with all data
             const saved = await saveDataToServer(employeeData, pdfDataStore, { testMode: testModeToggle.checked });
             if (!saved) {
                 setAdminMsg('❌ Failed to save data to server.', 'error');
@@ -1003,7 +997,6 @@
                 return;
             }
 
-            // Clear uploaded files after processing
             pdfFiles = [];
             csvData = null;
             csvFileName.textContent = '';
@@ -1028,7 +1021,7 @@
     // ---------- REFRESH DATA ----------
     $('refreshDataBtn').addEventListener('click', async function() {
         if (!adminUnlocked) { lockAdmin(); return; }
-        isTestModeSaved = false; // Reset so it loads from server
+        isTestModeSaved = false;
         await loadDataFromServer(true);
         setAdminMsg('🔄 Data refreshed from server.', 'success');
     });
@@ -1107,14 +1100,11 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
             return; 
         }
         
-        // Mark that test mode is being changed by admin
         isTestModeSaved = true;
         
-        // Update UI
         updateTestModeStatus();
         payslipArea.classList.remove('show');
         
-        // Update dummy password display based on current user or entered ID
         const empId = userEmpId.value.trim();
         if (empId) {
             const emp = findEmployee(empId);
@@ -1125,10 +1115,8 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
             updateDummyPasswordHint(currentUser);
         }
         
-        // Save to server immediately
         saveDataToServer(employeeData, null, { testMode: testModeToggle.checked });
         
-        // Reset the flag after save completes
         setTimeout(() => {
             isTestModeSaved = false;
         }, 2000);
@@ -1149,20 +1137,16 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
         let passOk = false;
         let loginMessage = '';
         
-        // Check if test mode is enabled
         if (testModeToggle.checked) {
-            // When test mode is ON, ANY password works for testing
-            // But we also accept the dummy password
+            // DUMMY PASSWORD = EMPLOYEE ID (exact match)
             const dummyPass = getDummyPassword(emp);
-            // Accept either the real password OR the dummy password
             if (password === emp.password || password === dummyPass) {
                 passOk = true;
                 if (password === dummyPass) {
-                    loginMessage = `🔬 Test Mode: Using dummy password for ${emp.name || emp.empId}`;
+                    loginMessage = `🔬 Test Mode: Logged in with Employee ID as password for ${emp.name || emp.empId}`;
                 }
             }
         } else {
-            // Test mode OFF - must use actual password
             passOk = (password === emp.password);
         }
 
@@ -1188,7 +1172,6 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
         payslipEmpName.textContent = user.name || user.empId;
         payslipEmpIdSpan.textContent = user.empId;
 
-        // Check if PDF exists in store
         if (user.pageNumber && user.pdfFile) {
             const pdfAvailable = pdfDataStore[user.pdfFile];
             if (!pdfAvailable) {
@@ -1202,7 +1185,6 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
                 const pdfBytes = await extractPageFromPdf(user.pdfFile, user.pageNumber);
                 const blob = new Blob([pdfBytes], { type: 'application/pdf' });
                 
-                // Revoke old URL if exists
                 if (payslipArea.dataset.pdfBlobUrl) {
                     URL.revokeObjectURL(payslipArea.dataset.pdfBlobUrl);
                 }
@@ -1258,7 +1240,6 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
         const hasPass = emp.password ? '✅ Set' : '❌ Not set';
         setUserMsg(`✅ Found: ${emp.name || emp.empId} | Password: ${hasPass} | PDF: ${pdfStatus}`, 'success');
         
-        // ALWAYS show dummy password if Test Mode is ON
         if (testModeToggle.checked) {
             const dummyPass = getDummyPassword(emp);
             dummyPasswordHint.textContent = dummyPass;
@@ -1303,10 +1284,8 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
         if (adminTabBtn) adminTabBtn.classList.remove('visible');
         adminToggleLink.style.display = 'flex';
 
-        // Load data from server
         await loadDataFromServer(true);
         
-        // Ensure test mode is OFF by default
         if (!testModeToggle.checked) {
             updateTestModeStatus();
         }
@@ -1314,7 +1293,6 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
         setAdminMsg(`📦 ${employeeData.length} employee records, ${Object.keys(pdfDataStore).length} PDFs loaded.`, '');
         setUserMsg('Enter Employee ID and password to download payslip.');
         
-        // Start auto-refresh for multi-device sync
         startAutoRefresh();
         
         console.log('📄 Multi-device payslip system running.');
@@ -1322,10 +1300,9 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
         console.log(`📄 ${Object.keys(pdfDataStore).length} PDFs loaded`);
         console.log('🔒 Test Mode: OFF by default.');
         console.log('💾 Data persists across refreshes!');
-        console.log('🔑 Admin controls Test Mode - it will NOT auto-reset.');
+        console.log('🔑 Dummy password = Employee ID (when Test Mode is ON)');
     }
 
-    // Make sure default tab is user
     userTabBtn.classList.add('active');
     document.getElementById('tab-user').classList.add('active');
     document.getElementById('tab-admin').classList.remove('active');

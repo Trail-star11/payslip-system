@@ -220,18 +220,6 @@
         .table-container { overflow-x: auto; }
         .settings-section { background: #f8fafc; padding: 1rem 1.5rem; border-radius: 16px; border: 1px solid #e2e8f0; margin-top: 1rem; }
         .pdf-count-badge { background: #2563eb; color: white; padding: 0.1rem 0.6rem; border-radius: 12px; font-size: 0.7rem; margin-left: 0.5rem; }
-        .refresh-indicator { 
-            display: inline-block; 
-            font-size: 0.8rem; 
-            color: #64748b; 
-            margin-left: 1rem;
-            animation: pulse 2s infinite;
-        }
-        @keyframes pulse {
-            0% { opacity: 0.6; }
-            50% { opacity: 1; }
-            100% { opacity: 0.6; }
-        }
         @media (max-width: 600px) { .panel { padding: 1.5rem; } .tab-btn { padding: 0.5rem 1.2rem; font-size: 0.9rem; } .payslip-download { flex-direction: column; align-items: stretch; } .employee-table { font-size: 0.8rem; } .employee-table th, .employee-table td { padding: 0.4rem 0.6rem; } .flex-between { flex-direction: column; align-items: stretch; } .dummy-password-display { flex-direction: column; align-items: stretch; text-align: center; } .action-bar { flex-direction: column; } .admin-lock-card { padding: 1.8rem 1.5rem; } }
     </style>
 </head>
@@ -464,15 +452,17 @@
             if (data && data.employees) {
                 employeeData = data.employees;
                 
-                // Load PDF data from server
+                // ============================================
+                // ✅ FIX: Load PDF data from server properly
+                // ============================================
                 if (data.pdfs) {
                     pdfDataStore = {};
                     let loadedCount = 0;
-                    let failedCount = 0;
                     
                     for (const [filename, pdfData] of Object.entries(data.pdfs)) {
                         if (pdfData.bytes) {
                             try {
+                                // Decode base64 to binary
                                 const binaryString = atob(pdfData.bytes);
                                 const bytes = new Uint8Array(binaryString.length);
                                 for (let i = 0; i < binaryString.length; i++) {
@@ -485,47 +475,38 @@
                                 loadedCount++;
                                 console.log(`✅ Loaded PDF: ${filename} (${pdfData.pages || 0} pages)`);
                             } catch(e) {
-                                failedCount++;
                                 console.error(`❌ Failed to load PDF ${filename}:`, e.message);
                             }
                         }
                     }
-                    console.log(`📄 Loaded ${loadedCount} PDFs, ${failedCount} failed`);
+                    console.log(`📄 Total PDFs loaded: ${loadedCount}`);
                 }
                 
-                // Load test mode from server - but respect manual override
+                // Load test mode from server
                 if (!manualTestModeOverride && !isTestModeChanging) {
                     if (data.settings && data.settings.testMode !== undefined) {
                         testModeToggle.checked = data.settings.testMode;
                         updateTestModeStatus();
-                        console.log(`🔒 Test Mode loaded from server: ${testModeToggle.checked ? 'ON' : 'OFF'}`);
                     } else {
                         testModeToggle.checked = false;
                         updateTestModeStatus();
                     }
-                } else {
-                    console.log(`🔒 Test Mode override active, keeping current state: ${testModeToggle.checked ? 'ON' : 'OFF'}`);
                 }
                 
                 renderEmployeeList();
                 dataLoaded = true;
                 
-                // Show last updated time
-                const lastUpdated = data.lastUpdated || data._meta?.lastUpdated || 'unknown';
-                const testModeStatusText = testModeToggle.checked ? 'ON' : 'OFF';
-                const pdfCount = Object.keys(pdfDataStore).length;
-                
                 if (adminUnlocked) {
-                    setAdminMsg(`✅ Loaded ${employeeData.length} employee records and ${pdfCount} PDFs from server. Last updated: ${lastUpdated !== 'unknown' ? new Date(lastUpdated).toLocaleString() : 'Never'}. Test Mode: ${testModeStatusText}`, 'success');
+                    const pdfCount = Object.keys(pdfDataStore).length;
+                    setAdminMsg(`✅ Loaded ${employeeData.length} employee records and ${pdfCount} PDFs from server. Test Mode: ${testModeToggle.checked ? 'ON' : 'OFF'}`, 'success');
                 }
-                
                 return true;
             }
             return false;
         } catch (error) {
             console.error('❌ Error loading data:', error);
             if (adminUnlocked) {
-                setAdminMsg('⚠️ Could not connect to server. Data may be lost on restart.', 'error');
+                setAdminMsg('⚠️ Could not connect to server.', 'error');
             }
             return false;
         } finally {
@@ -539,7 +520,9 @@
             console.log('💾 Saving data to server...');
             const data = { employees };
             
-            // Save PDFs
+            // ============================================
+            // ✅ FIX: Save PDFs with proper base64 encoding
+            // ============================================
             if (pdfs) {
                 data.pdfs = {};
                 for (const [filename, pdfData] of Object.entries(pdfs)) {
@@ -578,16 +561,10 @@
                 }
             }
             
-            // Save settings
             if (settings) {
                 data.settings = settings;
             } else {
                 data.settings = { testMode: testModeToggle.checked };
-            }
-            
-            // Ensure testMode is explicitly set
-            if (data.settings.testMode === undefined || data.settings.testMode === null) {
-                data.settings.testMode = false;
             }
             
             data.lastUpdated = new Date().toISOString();
@@ -596,8 +573,9 @@
                 method: 'POST',
                 body: JSON.stringify(data)
             });
-            console.log('✅ Data saved successfully');
-            console.log(`🔒 Test Mode saved as: ${data.settings.testMode ? 'ON' : 'OFF'}`);
+            
+            const pdfCount = Object.keys(data.pdfs || {}).length;
+            console.log(`✅ Data saved: ${data.employees.length} employees, ${pdfCount} PDFs`);
             return true;
         } catch (error) {
             console.error('❌ Error saving data:', error);
@@ -625,8 +603,6 @@
         adminLockError.textContent = '';
         if (adminTabBtn) {
             adminTabBtn.classList.remove('visible');
-            const lockIcon = document.querySelector('.admin-tab .lock-icon');
-            if (lockIcon) lockIcon.style.color = '#94a3b8';
         }
         if (adminTabBtn && adminTabBtn.classList.contains('active')) {
             adminTabBtn.classList.remove('active');
@@ -642,10 +618,8 @@
         adminLockOverlay.classList.add('hidden');
         if (adminTabBtn) {
             adminTabBtn.classList.add('visible');
-            const lockIcon = document.querySelector('.admin-tab .lock-icon');
-            if (lockIcon) lockIcon.style.color = '#16a34a';
         }
-        setAdminMsg('🔓 Admin panel unlocked. You can now manage payslips.', 'success');
+        setAdminMsg('🔓 Admin panel unlocked.', 'success');
         if (adminTabBtn) adminTabBtn.click();
         loadDataFromServer(true);
     }
@@ -715,7 +689,6 @@
         if (type) userStatus.classList.add(type);
     }
 
-    // ✅ FIX: Update test mode status and show/hide dummy password instantly
     function updateTestModeStatus() {
         const isTestModeOn = testModeToggle.checked;
         
@@ -723,40 +696,30 @@
             testModeStatus.textContent = '🔬 ON';
             testModeStatus.className = 'badge badge-test-on';
             if (adminUnlocked) {
-                setAdminMsg('🔬 Test Mode ENABLED. Employees can use their Employee ID as password.', 'warning');
+                setAdminMsg('🔬 Test Mode ENABLED.', 'warning');
             }
-            // ✅ FIX: ALWAYS show dummy password when test mode is ON
             showDummyPassword();
         } else {
             testModeStatus.textContent = '🔒 OFF';
             testModeStatus.className = 'badge badge-test-off';
-            // ✅ FIX: IMMEDIATELY hide dummy password when test mode is OFF
             dummyPasswordDisplay.classList.remove('show');
             if (adminUnlocked) {
-                setAdminMsg('🔒 Test Mode DISABLED. Employees must use their actual passwords.', '');
+                setAdminMsg('🔒 Test Mode DISABLED.', '');
             }
         }
     }
 
-    // ✅ FIX: Show dummy password with current Employee ID
     function showDummyPassword() {
         const empId = userEmpId.value.trim();
         
         if (empId) {
-            // Check if employee exists in system
             const emp = findEmployee(empId);
-            if (emp && emp.empId) {
-                dummyPasswordHint.textContent = emp.empId;
-            } else {
-                // Show the entered ID as dummy password
-                dummyPasswordHint.textContent = empId;
-            }
+            dummyPasswordHint.textContent = emp && emp.empId ? emp.empId : empId;
             dummyPasswordDisplay.classList.add('show');
         } else if (currentUser && currentUser.empId) {
             dummyPasswordHint.textContent = currentUser.empId;
             dummyPasswordDisplay.classList.add('show');
         } else {
-            // Show placeholder message
             dummyPasswordHint.textContent = 'Enter Employee ID to see your password';
             dummyPasswordDisplay.classList.add('show');
         }
@@ -770,10 +733,7 @@
     }
 
     function getDummyPassword(emp) {
-        if (emp && emp.empId) {
-            return emp.empId;
-        }
-        return 'dummy123';
+        return emp && emp.empId ? emp.empId : 'dummy123';
     }
 
     // ---------- EXTRACT FUNCTIONS ----------
@@ -792,12 +752,6 @@
                 if (name.length > 1) return name.trim();
             }
         }
-        const fallbackMatch = text.match(/^([A-Z\s]+?)(?=\s+No of Days|\s+Emp Code)/i);
-        if (fallbackMatch) {
-            let name = fallbackMatch[1].trim();
-            name = name.replace(/[^A-Za-z\s\.]/g, '');
-            if (name.length > 1) return name.trim();
-        }
         return null;
     }
 
@@ -815,7 +769,7 @@
                 if (id.length > 3) return id;
             }
         }
-        const fallback = [/\b(T1UB[0-9]+)\b/i, /\b(TXIX[0-9]+)\b/i, /\b(TXI\/X[0-9]+)\b/i, /\b([A-Z]{1,4}[0-9\/]{4,})\b/i];
+        const fallback = [/\b(T1UB[0-9]+)\b/i, /\b(TXIX[0-9]+)\b/i, /\b([A-Z]{1,4}[0-9\/]{4,})\b/i];
         for (const pattern of fallback) {
             const match = text.match(pattern);
             if (match) {
@@ -886,7 +840,6 @@
     async function extractPageFromPdf(filename, pageNumber) {
         const pdfData = pdfDataStore[filename];
         if (!pdfData) {
-            console.error(`❌ PDF '${filename}' not found in store`);
             throw new Error(`PDF '${filename}' not found. Please re-upload.`);
         }
         try {
@@ -896,7 +849,6 @@
             newPdfDoc.addPage(copiedPage);
             return await newPdfDoc.save();
         } catch(err) {
-            console.error('❌ Error extracting page:', err);
             throw new Error('Could not extract page: ' + err.message);
         }
     }
@@ -955,9 +907,14 @@
                 for (let p = 0; p < pdfFiles.length; p++) {
                     const pdfFile = pdfFiles[p];
                     progressText.textContent = `Loading PDF ${p + 1}/${pdfFiles.length}: ${pdfFile.name}...`;
+                    
+                    // ============================================
+                    // ✅ FIX: Read PDF as ArrayBuffer and store
+                    // ============================================
                     const arrayBuffer = await pdfFile.arrayBuffer();
                     const pdfBytes = new Uint8Array(arrayBuffer);
                     
+                    // Store PDF data
                     pdfDataStore[pdfFile.name] = { 
                         bytes: pdfBytes.buffer, 
                         pages: 0 
@@ -1026,6 +983,9 @@
 
             employeeData = mergedData;
             
+            // ============================================
+            // ✅ FIX: Save with all PDF data
+            // ============================================
             const currentTestMode = testModeToggle.checked;
             const saved = await saveDataToServer(employeeData, pdfDataStore, { testMode: currentTestMode });
             if (!saved) {
@@ -1034,6 +994,7 @@
                 return;
             }
 
+            // Clear uploaded files after processing
             pdfFiles = [];
             csvData = null;
             csvFileName.textContent = '';
@@ -1082,7 +1043,7 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
         link.click();
         document.body.removeChild(link);
         URL.revokeObjectURL(link.href);
-        setAdminMsg('✅ Sample CSV downloaded successfully!', 'success');
+        setAdminMsg('✅ Sample CSV downloaded!', 'success');
     });
 
     // ---------- CLEAR ALL ----------
@@ -1141,28 +1102,22 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
             return; 
         }
         
-        // Set flags to prevent auto-refresh from overriding
         isTestModeChanging = true;
         manualTestModeOverride = true;
         
-        // ✅ FIX: Update UI instantly
         updateTestModeStatus();
         payslipArea.classList.remove('show');
         
-        // ✅ FIX: Show/hide dummy password instantly based on toggle
         if (testModeToggle.checked) {
             showDummyPassword();
         } else {
             dummyPasswordDisplay.classList.remove('show');
         }
         
-        // Save to server immediately
         saveDataToServer(employeeData, null, { testMode: testModeToggle.checked });
         
-        // Release lock after save completes
         setTimeout(() => {
             isTestModeChanging = false;
-            console.log('🔓 Test mode change complete, auto-refresh re-enabled');
         }, 3000);
     });
 
@@ -1186,7 +1141,7 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
             if (password === emp.password || password === dummyPass) {
                 passOk = true;
                 if (password === dummyPass) {
-                    loginMessage = `🔬 Test Mode: Logged in with Employee ID as password for ${emp.name || emp.empId}`;
+                    loginMessage = `🔬 Test Mode: Logged in with Employee ID as password`;
                 }
             }
         } else {
@@ -1206,7 +1161,6 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
         }
         await showPayslip(emp);
         
-        // ✅ FIX: Show dummy password if test mode is ON
         if (testModeToggle.checked) {
             showDummyPassword();
         }
@@ -1222,7 +1176,7 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
         if (user.pageNumber && user.pdfFile) {
             const pdfAvailable = pdfDataStore[user.pdfFile];
             if (!pdfAvailable) {
-                setUserMsg(`⚠️ PDF '${user.pdfFile}' not found in server. Please contact admin to re-upload.`, 'error');
+                setUserMsg(`⚠️ PDF '${user.pdfFile}' not found. Please contact admin to re-upload.`, 'error');
                 payslipArea.classList.remove('show');
                 return;
             }
@@ -1242,15 +1196,14 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
                 payslipArea.classList.add('show');
                 setUserMsg('✅ Payslip ready for download!', 'success');
             } catch(err) {
-                console.error('❌ Error extracting payslip:', err);
                 setUserMsg('⚠️ Could not extract payslip: ' + err.message, 'error');
                 payslipArea.classList.remove('show');
             }
         } else if (user.pageNumber) {
-            setUserMsg('⚠️ PDF file reference found but no PDF data. Please contact admin.', 'error');
+            setUserMsg('⚠️ PDF file reference found but no data. Please contact admin.', 'error');
             payslipArea.classList.remove('show');
         } else {
-            setUserMsg('⚠️ No payslip found for this employee. Please contact admin.', 'error');
+            setUserMsg('⚠️ No payslip found for this employee.', 'error');
             payslipArea.classList.remove('show');
         }
     }
@@ -1282,26 +1235,19 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
         if (!emp) { setUserMsg(`No record for ${empId}`, 'error'); return; }
         
         const hasPdf = emp.pageNumber && emp.pdfFile && pdfDataStore[emp.pdfFile];
-        const pdfStatus = hasPdf ? `✅ Page ${emp.pageNumber} (${emp.pdfFile})` : 
-                         emp.pageNumber ? '❌ PDF not loaded' : '❌ No PDF';
+        const pdfStatus = hasPdf ? `✅ Page ${emp.pageNumber} (${emp.pdfFile})` : '❌ No PDF';
         const hasPass = emp.password ? '✅ Set' : '❌ Not set';
         setUserMsg(`✅ Found: ${emp.name || emp.empId} | Password: ${hasPass} | PDF: ${pdfStatus}`, 'success');
         
-        // ✅ FIX: Show dummy password if test mode is ON
         if (testModeToggle.checked) {
             showDummyPassword();
-        } else {
-            dummyPasswordDisplay.classList.remove('show');
         }
     });
 
-    // ---------- EMPLOYEE ID INPUT CHANGE ----------
+    // ---------- EMPLOYEE ID INPUT ----------
     userEmpId.addEventListener('input', function() {
-        // ✅ FIX: Update dummy password instantly when user types
         if (testModeToggle.checked) {
             showDummyPassword();
-        } else {
-            dummyPasswordDisplay.classList.remove('show');
         }
     });
 
@@ -1327,29 +1273,22 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
         if (adminTabBtn) adminTabBtn.classList.remove('visible');
         adminToggleLink.style.display = 'flex';
 
-        // Load data from server
         await loadDataFromServer(true);
         
-        // Ensure test mode is OFF by default
         if (!testModeToggle.checked) {
             testModeToggle.checked = false;
             updateTestModeStatus();
         }
         
-        setAdminMsg(`📦 ${employeeData.length} employee records, ${Object.keys(pdfDataStore).length} PDFs loaded. Test Mode: ${testModeToggle.checked ? 'ON' : 'OFF'}`, '');
+        setAdminMsg(`📦 ${employeeData.length} employee records, ${Object.keys(pdfDataStore).length} PDFs loaded.`, '');
         setUserMsg('Enter Employee ID and password to download payslip.');
         
-        // Start auto-refresh
         startAutoRefresh();
         
         console.log('📄 Multi-device payslip system running.');
-        console.log(`📊 ${employeeData.length} employees loaded`);
-        console.log(`📄 ${Object.keys(pdfDataStore).length} PDFs loaded`);
+        console.log(`📊 ${employeeData.length} employees`);
+        console.log(`📄 ${Object.keys(pdfDataStore).length} PDFs`);
         console.log(`🔒 Test Mode: ${testModeToggle.checked ? 'ON' : 'OFF'}`);
-        console.log('💾 Data persists across refreshes!');
-        console.log('🔑 Dummy password = Employee ID (shown instantly when Test Mode is ON)');
-        console.log('✅ Test Mode changes sync instantly across all browsers.');
-        console.log('✅ Page refresh will NOT change test mode state.');
     }
 
     userTabBtn.classList.add('active');

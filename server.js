@@ -17,7 +17,6 @@ let collection = null;
 let dataCache = null;
 
 console.log('🚀 Starting server...');
-console.log('📡 MongoDB URI:', MONGODB_URI.replace(/:[^:]*@/, ':****@')); // Hide password in logs
 
 // Connect to MongoDB
 async function connectToMongoDB() {
@@ -36,7 +35,6 @@ async function connectToMongoDB() {
         db = client.db(DB_NAME);
         collection = db.collection(COLLECTION_NAME);
         
-        // Create index on empId for faster queries
         try {
             await collection.createIndex({ 'employees.empId': 1 });
             console.log('✅ Index created on empId');
@@ -47,7 +45,7 @@ async function connectToMongoDB() {
         return true;
     } catch (error) {
         console.error('❌ MongoDB connection failed:', error.message);
-        console.log('⚠️ Running with local storage only (data may be lost on restart)');
+        console.log('⚠️ Running with local storage only');
         return false;
     }
 }
@@ -56,15 +54,12 @@ async function connectToMongoDB() {
 async function loadDataFromMongoDB() {
     try {
         if (!collection) return null;
-        
         const data = await collection.findOne({ _id: 'payslip_data' });
-        
         if (data) {
             delete data._id;
             console.log(`✅ Data loaded from MongoDB: ${data.employees ? data.employees.length : 0} employees, ${data.pdfs ? Object.keys(data.pdfs).length : 0} PDFs`);
             return data;
         }
-        
         return null;
     } catch (error) {
         console.error('❌ Error loading from MongoDB:', error);
@@ -168,19 +163,6 @@ app.post('/api/data', async (req, res) => {
         if (!data.employees) data.employees = [];
         if (!data.pdfs) data.pdfs = {};
         if (!data.settings) data.settings = { testMode: false };
-        
-        // Log PDF sizes
-        if (data.pdfs) {
-            let totalSize = 0;
-            for (const [name, pdf] of Object.entries(data.pdfs)) {
-                if (pdf.bytes) {
-                    const sizeInMB = (pdf.bytes.length * 0.75) / 1024 / 1024;
-                    totalSize += sizeInMB;
-                    console.log(`   📄 ${name}: ${pdf.pages || 0} pages, ${sizeInMB.toFixed(2)}MB (base64)`);
-                }
-            }
-            console.log(`📦 Total PDF data: ${totalSize.toFixed(2)}MB`);
-        }
         
         const saved = await saveDataToMongoDB(data);
         if (saved) {

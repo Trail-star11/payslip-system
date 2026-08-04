@@ -248,7 +248,7 @@
                 <input type="password" id="adminPasswordInput" placeholder="Enter admin password" autocomplete="off" />
                 <button class="btn" id="adminUnlockBtn"><i class="fas fa-unlock-alt"></i> Unlock</button>
                 <div id="adminLockError" class="error-msg"></div>
-                <div class="hint"><i class="fas fa-key"></i> <strong></strong></div>
+                <div class="hint"><i class="fas fa-key"></i> <strong>Default: admin123</strong></div>
             </div>
         </div>
     </div>
@@ -310,9 +310,9 @@
                     <span class="small-note">When enabled, the employee panel will show a dummy password hint for testing.</span>
                 </div>
                 <div style="display: flex; align-items: center; gap: 1rem;">
-                    <span id="testModeStatus" class="badge badge-test-on">🔬 ON</span>
+                    <span id="testModeStatus" class="badge badge-test-off">🔒 OFF</span>
                     <label class="toggle-label">
-                        <input type="checkbox" id="testModeToggle" checked />
+                        <input type="checkbox" id="testModeToggle" />
                         <span>Enable Test Mode</span>
                     </label>
                 </div>
@@ -341,7 +341,7 @@
 
         <div class="form-group">
             <label><i class="fas fa-id-badge"></i> Employee ID</label>
-            <input type="text" id="userEmpId" placeholder="e.g. TXIX11906" value="TXIX11906" />
+            <input type="text" id="userEmpId" placeholder="e.g. TXIX11906" />
         </div>
         <div class="form-group">
             <label><i class="fas fa-lock"></i> Password</label>
@@ -381,786 +381,828 @@
 <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
 
 <script>
-    (function() {
-        const ADMIN_PASSWORD = 'admin123';
-        const TEST_MODE_DEFAULT = true;
-        const API_BASE = '/api';
+(function() {
+    const ADMIN_PASSWORD = 'admin123';
+    const API_BASE = '/api';
 
-        let employeeData = [];
-        let pdfDataStore = {};
-        let currentUser = null;
-        let pdfFiles = [];
-        let csvData = null;
-        let adminUnlocked = false;
-        let autoRefreshInterval = null;
+    let employeeData = [];
+    let pdfDataStore = {};
+    let currentUser = null;
+    let pdfFiles = [];
+    let csvData = null;
+    let adminUnlocked = false;
+    let autoRefreshInterval = null;
+    let isRefreshing = false;
 
-        const $ = id => document.getElementById(id);
-        const adminStatus = $('adminStatus');
-        const userStatus = $('userStatus');
-        const userEmpId = $('userEmpId');
-        const userPassword = $('userPassword');
-        const payslipArea = $('payslipDownloadArea');
-        const payslipEmpName = $('payslipEmployeeName');
-        const payslipEmpIdSpan = $('payslipEmpId');
-        const payslipFileSize = $('payslipFileSize');
-        const downloadBtn = $('downloadPayslipBtn');
-        const employeeList = $('employeeList');
-        const employeeCount = $('employeeCount');
-        const recordStats = $('recordStats');
-        const dummyPasswordDisplay = $('dummyPasswordDisplay');
-        const dummyPasswordHint = $('dummyPasswordHint');
-        const testModeToggle = $('testModeToggle');
-        const testModeStatus = $('testModeStatus');
-        const progressContainer = $('progressContainer');
-        const progressFill = $('progressFill');
-        const progressText = $('progressText');
-        const progressPercent = $('progressPercent');
-        const csvFileName = $('csvFileName');
-        const pdfFileName = $('pdfFileName');
-        const pdfFileList = $('pdfFileList');
-        const pdfCount = $('pdfCount');
-        const csvUploadBox = $('csvUploadBox');
-        const pdfUploadBox = $('pdfUploadBox');
-        const adminLockOverlay = $('adminLockOverlay');
-        const adminPasswordInput = $('adminPasswordInput');
-        const adminUnlockBtn = $('adminUnlockBtn');
-        const adminLockError = $('adminLockError');
-        const adminToggleLink = $('adminToggleLink');
-        const adminTabBtn = document.querySelector('.admin-tab');
-        const userTabBtn = document.querySelector('[data-tab="tab-user"]');
-        const adminLockCloseBtn = $('adminLockCloseBtn');
-        const adminLockCard = $('adminLockCard');
+    const $ = id => document.getElementById(id);
+    const adminStatus = $('adminStatus');
+    const userStatus = $('userStatus');
+    const userEmpId = $('userEmpId');
+    const userPassword = $('userPassword');
+    const payslipArea = $('payslipDownloadArea');
+    const payslipEmpName = $('payslipEmployeeName');
+    const payslipEmpIdSpan = $('payslipEmpId');
+    const payslipFileSize = $('payslipFileSize');
+    const downloadBtn = $('downloadPayslipBtn');
+    const employeeList = $('employeeList');
+    const employeeCount = $('employeeCount');
+    const recordStats = $('recordStats');
+    const dummyPasswordDisplay = $('dummyPasswordDisplay');
+    const dummyPasswordHint = $('dummyPasswordHint');
+    const testModeToggle = $('testModeToggle');
+    const testModeStatus = $('testModeStatus');
+    const progressContainer = $('progressContainer');
+    const progressFill = $('progressFill');
+    const progressText = $('progressText');
+    const progressPercent = $('progressPercent');
+    const csvFileName = $('csvFileName');
+    const pdfFileName = $('pdfFileName');
+    const pdfFileList = $('pdfFileList');
+    const pdfCount = $('pdfCount');
+    const csvUploadBox = $('csvUploadBox');
+    const pdfUploadBox = $('pdfUploadBox');
+    const adminLockOverlay = $('adminLockOverlay');
+    const adminPasswordInput = $('adminPasswordInput');
+    const adminUnlockBtn = $('adminUnlockBtn');
+    const adminLockError = $('adminLockError');
+    const adminToggleLink = $('adminToggleLink');
+    const adminTabBtn = document.querySelector('.admin-tab');
+    const userTabBtn = document.querySelector('[data-tab="tab-user"]');
+    const adminLockCloseBtn = $('adminLockCloseBtn');
 
-        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
 
-        // ---------- API CALLS ----------
-        async function apiCall(endpoint, options = {}) {
-    const url = `${API_BASE}${endpoint}`;
-    console.log('📡 API Call:', url);
-    
-    const response = await fetch(url, {
-        ...options,
-        headers: {
-            'Content-Type': 'application/json',
-            ...options.headers
+    // ---------- API CALLS ----------
+    async function apiCall(endpoint, options = {}) {
+        const url = `${API_BASE}${endpoint}`;
+        const response = await fetch(url, {
+            ...options,
+            headers: {
+                'Content-Type': 'application/json',
+                ...options.headers
+            }
+        });
+        if (!response.ok) {
+            const error = await response.text();
+            throw new Error(error || 'API call failed');
+        }
+        return response.json();
+    }
+
+    // ---------- LOAD DATA FROM SERVER ----------
+    async function loadDataFromServer() {
+        if (isRefreshing) return;
+        isRefreshing = true;
+        
+        try {
+            const data = await apiCall('/data');
+            if (data && data.employees) {
+                employeeData = data.employees;
+                
+                // Load PDF data from server
+                if (data.pdfs) {
+                    pdfDataStore = {};
+                    for (const [filename, pdfData] of Object.entries(data.pdfs)) {
+                        if (pdfData.bytes) {
+                            const binaryString = atob(pdfData.bytes);
+                            const bytes = new Uint8Array(binaryString.length);
+                            for (let i = 0; i < binaryString.length; i++) {
+                                bytes[i] = binaryString.charCodeAt(i);
+                            }
+                            pdfDataStore[filename] = {
+                                bytes: bytes.buffer,
+                                pages: pdfData.pages || 0
+                            };
+                        }
+                    }
+                }
+                
+                // Load settings (test mode)
+                if (data.settings && data.settings.testMode !== undefined) {
+                    testModeToggle.checked = data.settings.testMode;
+                } else {
+                    // Default: test mode OFF
+                    testModeToggle.checked = false;
+                }
+                updateTestModeStatus();
+                
+                renderEmployeeList();
+                if (adminUnlocked) {
+                    setAdminMsg(`✅ Loaded ${employeeData.length} employee records from server.`, 'success');
+                }
+                return true;
+            }
+            return false;
+        } catch (error) {
+            console.error('Error loading data:', error);
+            if (adminUnlocked) {
+                setAdminMsg('⚠️ Could not connect to server.', 'error');
+            }
+            return false;
+        } finally {
+            isRefreshing = false;
+        }
+    }
+
+    // ---------- SAVE DATA TO SERVER ----------
+    async function saveDataToServer(employees, pdfs = null, settings = null) {
+        try {
+            const data = { employees };
+            
+            // Save PDFs if provided
+            if (pdfs) {
+                data.pdfs = {};
+                for (const [filename, pdfData] of Object.entries(pdfs)) {
+                    const bytes = new Uint8Array(pdfData.bytes);
+                    let binary = '';
+                    for (let i = 0; i < bytes.length; i++) {
+                        binary += String.fromCharCode(bytes[i]);
+                    }
+                    data.pdfs[filename] = {
+                        bytes: btoa(binary),
+                        pages: pdfData.pages || 0
+                    };
+                }
+            } else if (Object.keys(pdfDataStore).length > 0) {
+                // Save existing pdfDataStore
+                data.pdfs = {};
+                for (const [filename, pdfData] of Object.entries(pdfDataStore)) {
+                    const bytes = new Uint8Array(pdfData.bytes);
+                    let binary = '';
+                    for (let i = 0; i < bytes.length; i++) {
+                        binary += String.fromCharCode(bytes[i]);
+                    }
+                    data.pdfs[filename] = {
+                        bytes: btoa(binary),
+                        pages: pdfData.pages || 0
+                    };
+                }
+            }
+            
+            // Save settings
+            if (settings) {
+                data.settings = settings;
+            } else {
+                data.settings = { testMode: testModeToggle.checked };
+            }
+            
+            await apiCall('/data', {
+                method: 'POST',
+                body: JSON.stringify(data)
+            });
+            return true;
+        } catch (error) {
+            console.error('Error saving data:', error);
+            setAdminMsg('⚠️ Could not save data to server.', 'error');
+            return false;
+        }
+    }
+
+    // ---------- AUTO REFRESH ----------
+    function startAutoRefresh() {
+        if (autoRefreshInterval) clearInterval(autoRefreshInterval);
+        autoRefreshInterval = setInterval(async () => {
+            if (document.hidden) return;
+            await loadDataFromServer();
+        }, 5000);
+    }
+
+    // ---------- ADMIN LOCK ----------
+    function lockAdmin() {
+        adminUnlocked = false;
+        adminLockOverlay.classList.remove('hidden');
+        adminPasswordInput.value = '';
+        adminLockError.textContent = '';
+        if (adminTabBtn) {
+            adminTabBtn.classList.remove('visible');
+            const lockIcon = document.querySelector('.admin-tab .lock-icon');
+            if (lockIcon) lockIcon.style.color = '#94a3b8';
+        }
+        if (adminTabBtn && adminTabBtn.classList.contains('active')) {
+            adminTabBtn.classList.remove('active');
+            userTabBtn.classList.add('active');
+            document.getElementById('tab-admin').classList.remove('active');
+            document.getElementById('tab-user').classList.add('active');
+        }
+        setTimeout(() => adminPasswordInput.focus(), 100);
+    }
+
+    function unlockAdmin() {
+        adminUnlocked = true;
+        adminLockOverlay.classList.add('hidden');
+        if (adminTabBtn) {
+            adminTabBtn.classList.add('visible');
+            const lockIcon = document.querySelector('.admin-tab .lock-icon');
+            if (lockIcon) lockIcon.style.color = '#16a34a';
+        }
+        setAdminMsg('🔓 Admin panel unlocked. You can now manage payslips.', 'success');
+        if (adminTabBtn) adminTabBtn.click();
+        loadDataFromServer();
+    }
+
+    function closeAdminLock() {
+        adminLockOverlay.classList.add('hidden');
+        if (!adminUnlocked && adminTabBtn) {
+            adminTabBtn.classList.remove('visible');
+        }
+    }
+
+    adminLockCloseBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        closeAdminLock();
+    });
+
+    adminLockOverlay.addEventListener('click', function(e) {
+        if (e.target === adminLockOverlay) {
+            closeAdminLock();
         }
     });
-    
-    if (!response.ok) {
-        const error = await response.text();
-        throw new Error(error || 'API call failed');
-    }
-    return response.json();
-}
 
-        async function loadDataFromServer() {
-            try {
-                const data = await apiCall('/data');
-                if (data && data.employees) {
-                    employeeData = data.employees;
-                    // Load PDF data from server
-                    if (data.pdfs) {
-                        pdfDataStore = {};
-                        for (const [filename, pdfData] of Object.entries(data.pdfs)) {
-                            if (pdfData.bytes) {
-                                const binaryString = atob(pdfData.bytes);
-                                const bytes = new Uint8Array(binaryString.length);
-                                for (let i = 0; i < binaryString.length; i++) {
-                                    bytes[i] = binaryString.charCodeAt(i);
-                                }
-                                pdfDataStore[filename] = {
-                                    bytes: bytes.buffer,
-                                    pages: pdfData.pages || 0
-                                };
-                            }
-                        }
-                    }
-                    renderEmployeeList();
-                    setAdminMsg(`✅ Loaded ${employeeData.length} employee records from server.`, 'success');
-                    return true;
-                }
-                return false;
-            } catch (error) {
-                console.error('Error loading data:', error);
-                setAdminMsg('⚠️ Could not connect to server. Make sure the server is running.', 'error');
-                return false;
-            }
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && !adminLockOverlay.classList.contains('hidden')) {
+            closeAdminLock();
         }
+    });
 
-        async function saveDataToServer(employees, pdfs = null) {
-            try {
-                const data = { employees };
-                if (pdfs) {
-                    data.pdfs = {};
-                    for (const [filename, pdfData] of Object.entries(pdfs)) {
-                        const bytes = new Uint8Array(pdfData.bytes);
-                        let binary = '';
-                        for (let i = 0; i < bytes.length; i++) {
-                            binary += String.fromCharCode(bytes[i]);
-                        }
-                        data.pdfs[filename] = {
-                            bytes: btoa(binary),
-                            pages: pdfData.pages || 0
-                        };
-                    }
-                }
-                await apiCall('/data', {
-                    method: 'POST',
-                    body: JSON.stringify(data)
-                });
-                return true;
-            } catch (error) {
-                console.error('Error saving data:', error);
-                setAdminMsg('⚠️ Could not save data to server.', 'error');
-                return false;
-            }
-        }
-
-        // ---------- AUTO REFRESH ----------
-        function startAutoRefresh() {
-            if (autoRefreshInterval) clearInterval(autoRefreshInterval);
-            autoRefreshInterval = setInterval(async () => {
-                if (document.hidden) return; // Don't refresh if tab is hidden
-                try {
-                    const data = await apiCall('/data');
-                    if (data && data.employees) {
-                        // Check if data has changed
-                        const currentIds = employeeData.map(e => e.empId).sort().join(',');
-                        const newIds = data.employees.map(e => e.empId).sort().join(',');
-                        if (currentIds !== newIds) {
-                            employeeData = data.employees;
-                            renderEmployeeList();
-                            if (adminUnlocked) {
-                                setAdminMsg('🔄 Data updated from server', 'warning');
-                            }
-                        }
-                    }
-                } catch (error) {
-                    // Silently fail - don't show errors for auto-refresh
-                }
-            }, 5000); // Refresh every 5 seconds
-        }
-
-        // ---------- ADMIN LOCK ----------
-        function lockAdmin() {
-            adminUnlocked = false;
-            adminLockOverlay.classList.remove('hidden');
+    adminUnlockBtn.addEventListener('click', function() {
+        const pass = adminPasswordInput.value.trim();
+        if (pass === ADMIN_PASSWORD) {
+            unlockAdmin();
+        } else {
+            adminLockError.textContent = '❌ Incorrect password. Try again.';
             adminPasswordInput.value = '';
-            adminLockError.textContent = '';
-            if (adminTabBtn) {
-                adminTabBtn.classList.remove('visible');
-                document.querySelector('.admin-tab .lock-icon').style.color = '#94a3b8';
-            }
-            if (adminTabBtn && adminTabBtn.classList.contains('active')) {
-                adminTabBtn.classList.remove('active');
-                userTabBtn.classList.add('active');
-                document.getElementById('tab-admin').classList.remove('active');
-                document.getElementById('tab-user').classList.add('active');
-            }
+            adminPasswordInput.focus();
+        }
+    });
+
+    adminPasswordInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') adminUnlockBtn.click();
+    });
+
+    adminToggleLink.addEventListener('click', function() {
+        if (adminUnlocked) {
+            if (adminTabBtn) adminTabBtn.click();
+        } else {
+            adminLockOverlay.classList.remove('hidden');
             setTimeout(() => adminPasswordInput.focus(), 100);
         }
+    });
 
-        function unlockAdmin() {
-            adminUnlocked = true;
-            adminLockOverlay.classList.add('hidden');
-            if (adminTabBtn) {
-                adminTabBtn.classList.add('visible');
-                document.querySelector('.admin-tab .lock-icon').style.color = '#16a34a';
-            }
-            setAdminMsg('🔓 Admin panel unlocked. You can now manage payslips.', 'success');
-            if (adminTabBtn) adminTabBtn.click();
-            loadDataFromServer();
-        }
+    // ---------- HELPERS ----------
+    function findEmployee(empId) {
+        return employeeData.find(e => e.empId.toLowerCase() === empId.toLowerCase()) || null;
+    }
 
-        function closeAdminLock() {
-            adminLockOverlay.classList.add('hidden');
-            if (!adminUnlocked) {
-                if (adminTabBtn) adminTabBtn.classList.remove('visible');
-            }
-        }
+    function setAdminMsg(msg, type = '') {
+        adminStatus.innerHTML = `<i class="fas ${type === 'error' ? 'fa-exclamation-triangle' : type === 'success' ? 'fa-check-circle' : 'fa-info-circle'}"></i> ${msg}`;
+        adminStatus.className = 'status-box';
+        if (type) adminStatus.classList.add(type);
+    }
 
-        adminLockCloseBtn.addEventListener('click', function(e) {
-            e.stopPropagation();
-            closeAdminLock();
-        });
+    function setUserMsg(msg, type = '') {
+        userStatus.innerHTML = `<i class="fas ${type === 'error' ? 'fa-exclamation-triangle' : type === 'success' ? 'fa-check-circle' : 'fa-info-circle'}"></i> ${msg}`;
+        userStatus.className = 'status-box';
+        if (type) userStatus.classList.add(type);
+    }
 
-        adminLockOverlay.addEventListener('click', function(e) {
-            if (e.target === adminLockOverlay) {
-                closeAdminLock();
-            }
-        });
-
-        document.addEventListener('keydown', function(e) {
-            if (e.key === 'Escape' && !adminLockOverlay.classList.contains('hidden')) {
-                closeAdminLock();
-            }
-        });
-
-        adminUnlockBtn.addEventListener('click', function() {
-            const pass = adminPasswordInput.value.trim();
-            if (pass === ADMIN_PASSWORD) {
-                unlockAdmin();
-            } else {
-                adminLockError.textContent = '❌ Incorrect password. Try again.';
-                adminPasswordInput.value = '';
-                adminPasswordInput.focus();
-            }
-        });
-
-        adminPasswordInput.addEventListener('keydown', function(e) {
-            if (e.key === 'Enter') adminUnlockBtn.click();
-        });
-
-        adminToggleLink.addEventListener('click', function() {
+    function updateTestModeStatus() {
+        if (testModeToggle.checked) {
+            testModeStatus.textContent = '🔬 ON';
+            testModeStatus.className = 'badge badge-test-on';
             if (adminUnlocked) {
-                if (adminTabBtn) adminTabBtn.click();
-            } else {
-                adminLockOverlay.classList.remove('hidden');
-                setTimeout(() => adminPasswordInput.focus(), 100);
+                setAdminMsg('🔬 Test Mode is ENABLED. Password hints will be shown.', 'warning');
             }
-        });
-
-        // ---------- HELPERS ----------
-        function findEmployee(empId) {
-            return employeeData.find(e => e.empId.toLowerCase() === empId.toLowerCase()) || null;
-        }
-
-        function setAdminMsg(msg, type = '') {
-            adminStatus.innerHTML = `<i class="fas ${type === 'error' ? 'fa-exclamation-triangle' : type === 'success' ? 'fa-check-circle' : 'fa-info-circle'}"></i> ${msg}`;
-            adminStatus.className = 'status-box';
-            if (type) adminStatus.classList.add(type);
-        }
-
-        function setUserMsg(msg, type = '') {
-            userStatus.innerHTML = `<i class="fas ${type === 'error' ? 'fa-exclamation-triangle' : type === 'success' ? 'fa-check-circle' : 'fa-info-circle'}"></i> ${msg}`;
-            userStatus.className = 'status-box';
-            if (type) userStatus.classList.add(type);
-        }
-
-        function updateTestModeStatus() {
-            if (testModeToggle.checked) {
-                testModeStatus.textContent = '🔬 ON';
-                testModeStatus.className = 'badge badge-test-on';
-                dummyPasswordDisplay.classList.add('show');
-                if (adminUnlocked) setAdminMsg('🔬 Test Mode is ENABLED. Password hints will be shown in Employee panel.', 'warning');
-            } else {
-                testModeStatus.textContent = '🔒 OFF';
-                testModeStatus.className = 'badge badge-test-off';
-                dummyPasswordDisplay.classList.remove('show');
-                if (adminUnlocked) setAdminMsg('🔒 Test Mode is DISABLED. Employees must know their password.', '');
+        } else {
+            testModeStatus.textContent = '🔒 OFF';
+            testModeStatus.className = 'badge badge-test-off';
+            dummyPasswordDisplay.classList.remove('show');
+            if (adminUnlocked) {
+                setAdminMsg('🔒 Test Mode is DISABLED. Employees must know their password.', '');
             }
         }
-
-        function formatSize(bytes) {
-            if (!bytes) return 'Unknown size';
-            if (bytes < 1024) return bytes + ' B';
-            if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
-            return (bytes / 1048576).toFixed(1) + ' MB';
+        // Save settings to server (only if admin is unlocked)
+        if (adminUnlocked) {
+            saveDataToServer(employeeData, null, { testMode: testModeToggle.checked });
         }
+    }
 
-        function updateDummyPasswordHint(user) {
-            if (user && testModeToggle.checked) {
-                const pass = user.password || 'dummy123';
-                dummyPasswordHint.textContent = pass;
-                dummyPasswordDisplay.classList.add('show');
-            } else {
-                dummyPasswordDisplay.classList.remove('show');
-            }
+    function formatSize(bytes) {
+        if (!bytes) return 'Unknown size';
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / 1048576).toFixed(1) + ' MB';
+    }
+
+    function updateDummyPasswordHint(user) {
+        if (user && testModeToggle.checked) {
+            const pass = user.password || 'dummy123';
+            dummyPasswordHint.textContent = pass;
+            dummyPasswordDisplay.classList.add('show');
+        } else {
+            dummyPasswordDisplay.classList.remove('show');
         }
+    }
 
-        // ---------- EXTRACT FUNCTIONS ----------
-        function extractName(text) {
-            const patterns = [
-                /Name of the Employee[:.\s]*([A-Z\s]+?)(?=\s+No of Days|\s+Emp Code|\s+Aadhaar|\s+Designation|$)/i,
-                /Employee Name[:.\s]*([A-Z\s]+?)(?=\s+No of Days|\s+Emp Code|\s+Aadhaar|\s+Designation|$)/i,
-                /Name[:.\s]*([A-Z\s]+?)(?=\s+No of Days|\s+Emp Code|\s+Aadhaar|\s+Designation|$)/i,
-            ];
-            for (const pattern of patterns) {
-                const match = text.match(pattern);
-                if (match) {
-                    let name = match[1].trim();
-                    name = name.replace(/\s+No of Days.*$/i, '').replace(/\s+Emp Code.*$/i, '').replace(/\s+Aadhaar.*$/i, '').replace(/\s+Designation.*$/i, '');
-                    name = name.replace(/[^A-Za-z\s\.]/g, '');
-                    if (name.length > 1) return name.trim();
-                }
-            }
-            const fallbackMatch = text.match(/^([A-Z\s]+?)(?=\s+No of Days|\s+Emp Code)/i);
-            if (fallbackMatch) {
-                let name = fallbackMatch[1].trim();
+    // ---------- EXTRACT FUNCTIONS ----------
+    function extractName(text) {
+        const patterns = [
+            /Name of the Employee[:.\s]*([A-Z\s]+?)(?=\s+No of Days|\s+Emp Code|\s+Aadhaar|\s+Designation|$)/i,
+            /Employee Name[:.\s]*([A-Z\s]+?)(?=\s+No of Days|\s+Emp Code|\s+Aadhaar|\s+Designation|$)/i,
+            /Name[:.\s]*([A-Z\s]+?)(?=\s+No of Days|\s+Emp Code|\s+Aadhaar|\s+Designation|$)/i,
+        ];
+        for (const pattern of patterns) {
+            const match = text.match(pattern);
+            if (match) {
+                let name = match[1].trim();
+                name = name.replace(/\s+No of Days.*$/i, '').replace(/\s+Emp Code.*$/i, '').replace(/\s+Aadhaar.*$/i, '').replace(/\s+Designation.*$/i, '');
                 name = name.replace(/[^A-Za-z\s\.]/g, '');
                 if (name.length > 1) return name.trim();
             }
-            return null;
+        }
+        const fallbackMatch = text.match(/^([A-Z\s]+?)(?=\s+No of Days|\s+Emp Code)/i);
+        if (fallbackMatch) {
+            let name = fallbackMatch[1].trim();
+            name = name.replace(/[^A-Za-z\s\.]/g, '');
+            if (name.length > 1) return name.trim();
+        }
+        return null;
+    }
+
+    function extractEmpId(text) {
+        const patterns = [
+            /Emp Code[:.\s]*([A-Z0-9\/]+)/i,
+            /Employee Code[:.\s]*([A-Z0-9\/]+)/i,
+            /EmpID[:.\s]*([A-Z0-9\/]+)/i,
+            /Emp Id[:.\s]*([A-Z0-9\/]+)/i,
+        ];
+        for (const pattern of patterns) {
+            const match = text.match(pattern);
+            if (match) {
+                let id = match[1].trim().replace(/[^A-Z0-9\/]/g, '');
+                if (id.length > 3) return id;
+            }
+        }
+        const fallback = [/\b(T1UB[0-9]+)\b/i, /\b(TXIX[0-9]+)\b/i, /\b(TXI\/X[0-9]+)\b/i, /\b([A-Z]{1,4}[0-9\/]{4,})\b/i];
+        for (const pattern of fallback) {
+            const match = text.match(pattern);
+            if (match) {
+                let id = match[1].trim().replace(/[^A-Z0-9\/]/g, '');
+                if (id.length > 3) return id;
+            }
+        }
+        return null;
+    }
+
+    // ---------- RENDER ----------
+    function renderEmployeeList() {
+        employeeCount.textContent = employeeData.length;
+        const withPdf = employeeData.filter(e => e.pageNumber).length;
+        const withPass = employeeData.filter(e => e.password && e.password.length > 0).length;
+        recordStats.textContent = `📊 ${withPdf} with PDF | ${withPass} with password`;
+
+        if (employeeData.length === 0) {
+            employeeList.innerHTML = '<p style="color: #94a3b8; text-align: center; padding: 1rem;">No employees uploaded yet</p>';
+            return;
         }
 
-        function extractEmpId(text) {
-            const patterns = [
-                /Emp Code[:.\s]*([A-Z0-9\/]+)/i,
-                /Employee Code[:.\s]*([A-Z0-9\/]+)/i,
-                /EmpID[:.\s]*([A-Z0-9\/]+)/i,
-                /Emp Id[:.\s]*([A-Z0-9\/]+)/i,
-            ];
-            for (const pattern of patterns) {
-                const match = text.match(pattern);
-                if (match) {
-                    let id = match[1].trim().replace(/[^A-Z0-9\/]/g, '');
-                    if (id.length > 3) return id;
-                }
-            }
-            const fallback = [/\b(T1UB[0-9]+)\b/i, /\b(TXIX[0-9]+)\b/i, /\b(TXI\/X[0-9]+)\b/i, /\b([A-Z]{1,4}[0-9\/]{4,})\b/i];
-            for (const pattern of fallback) {
-                const match = text.match(pattern);
-                if (match) {
-                    let id = match[1].trim().replace(/[^A-Z0-9\/]/g, '');
-                    if (id.length > 3) return id;
-                }
-            }
-            return null;
+        let html = `<table class="employee-table"><thead><tr><th>Emp ID</th><th>Name</th><th>PDF Found</th><th>Password</th></tr></thead><tbody>`;
+        employeeData.forEach(emp => {
+            const pdfStatus = emp.pageNumber ? `<span class="badge badge-page">Page ${emp.pageNumber}${emp.pdfFile ? ' (' + emp.pdfFile + ')' : ''}</span>` : `<span class="badge badge-not-found">Not found</span>`;
+            const passStatus = emp.password && emp.password.length > 0 ? `<span class="badge badge-pass-yes">✅ Available</span>` : `<span class="badge badge-pass-no">❌ Not set</span>`;
+            html += `<tr><td><strong>${emp.empId}</strong></td><td>${emp.name || 'N/A'}</td><td>${pdfStatus}</td><td>${passStatus}</td></tr>`;
+        });
+        html += '</tbody></table>';
+        employeeList.innerHTML = html;
+    }
+
+    function updatePdfFileList() {
+        if (pdfFiles.length === 0) {
+            pdfFileList.innerHTML = '';
+            pdfCount.textContent = '0';
+            pdfFileName.textContent = '';
+            pdfUploadBox.classList.remove('has-file');
+            return;
         }
+        pdfCount.textContent = pdfFiles.length;
+        pdfFileName.textContent = `📄 ${pdfFiles.length} PDF(s) selected`;
+        pdfUploadBox.classList.add('has-file');
 
-        // ---------- RENDER ----------
-        function renderEmployeeList() {
-            employeeCount.textContent = employeeData.length;
-            const withPdf = employeeData.filter(e => e.pageNumber).length;
-            const withPass = employeeData.filter(e => e.password && e.password.length > 0).length;
-            recordStats.textContent = `📊 ${withPdf} with PDF | ${withPass} with password`;
+        let html = '';
+        pdfFiles.forEach((file, index) => {
+            html += `<div class="file-list-item"><span>${file.name} (${formatSize(file.size)})</span><button class="remove-file" data-index="${index}">✕</button></div>`;
+        });
+        pdfFileList.innerHTML = html;
 
-            if (employeeData.length === 0) {
-                employeeList.innerHTML = '<p style="color: #94a3b8; text-align: center; padding: 1rem;">No employees uploaded yet</p>';
-                return;
-            }
-
-            let html = `<table class="employee-table"><thead><tr><th>Emp ID</th><th>Name</th><th>PDF Found</th><th>Password</th></tr></thead><tbody>`;
-            employeeData.forEach(emp => {
-                const pdfStatus = emp.pageNumber ? `<span class="badge badge-page">Page ${emp.pageNumber}${emp.pdfFile ? ' (' + emp.pdfFile + ')' : ''}</span>` : `<span class="badge badge-not-found">Not found</span>`;
-                const passStatus = emp.password && emp.password.length > 0 ? `<span class="badge badge-pass-yes">✅ Available</span>` : `<span class="badge badge-pass-no">❌ Not set</span>`;
-                html += `<tr><td><strong>${emp.empId}</strong></td><td>${emp.name || 'N/A'}</td><td>${pdfStatus}</td><td>${passStatus}</td></tr>`;
+        document.querySelectorAll('.remove-file').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const index = parseInt(this.dataset.index);
+                pdfFiles.splice(index, 1);
+                updatePdfFileList();
+                $('pdfFileInput').value = '';
             });
-            html += '</tbody></table>';
-            employeeList.innerHTML = html;
+        });
+    }
+
+    // ---------- EXTRACT PAGE FROM PDF ----------
+    async function extractPageFromPdf(filename, pageNumber) {
+        const pdfData = pdfDataStore[filename];
+        if (!pdfData) throw new Error(`PDF '${filename}' not found`);
+        try {
+            const pdfDoc = await PDFLib.PDFDocument.load(pdfData.bytes);
+            const newPdfDoc = await PDFLib.PDFDocument.create();
+            const [copiedPage] = await newPdfDoc.copyPages(pdfDoc, [pageNumber - 1]);
+            newPdfDoc.addPage(copiedPage);
+            return await newPdfDoc.save();
+        } catch(err) {
+            throw new Error('Could not extract page: ' + err.message);
+        }
+    }
+
+    // ---------- PROCESS DATA ----------
+    $('processDataBtn').addEventListener('click', async function() {
+        if (!adminUnlocked) { lockAdmin(); return; }
+        if (!csvData && pdfFiles.length === 0) {
+            setAdminMsg('Please upload a CSV file or at least one PDF file.', 'error');
+            return;
         }
 
-        function updatePdfFileList() {
-            if (pdfFiles.length === 0) {
-                pdfFileList.innerHTML = '';
-                pdfCount.textContent = '0';
-                pdfFileName.textContent = '';
-                pdfUploadBox.classList.remove('has-file');
-                return;
-            }
-            pdfCount.textContent = pdfFiles.length;
-            pdfFileName.textContent = `📄 ${pdfFiles.length} PDF(s) selected`;
-            pdfUploadBox.classList.add('has-file');
+        progressContainer.style.display = 'block';
+        progressFill.style.width = '0%';
+        progressPercent.textContent = '0%';
+        progressText.textContent = 'Starting...';
 
-            let html = '';
-            pdfFiles.forEach((file, index) => {
-                html += `<div class="file-list-item"><span>${file.name} (${formatSize(file.size)})</span><button class="remove-file" data-index="${index}">✕</button></div>`;
-            });
-            pdfFileList.innerHTML = html;
-
-            document.querySelectorAll('.remove-file').forEach(btn => {
-                btn.addEventListener('click', function() {
-                    const index = parseInt(this.dataset.index);
-                    pdfFiles.splice(index, 1);
-                    updatePdfFileList();
-                    $('pdfFileInput').value = '';
-                });
-            });
-        }
-
-        // ---------- EXTRACT PAGE FROM PDF ----------
-        async function extractPageFromPdf(filename, pageNumber) {
-            const pdfData = pdfDataStore[filename];
-            if (!pdfData) throw new Error(`PDF '${filename}' not found`);
-            try {
-                const pdfDoc = await PDFLib.PDFDocument.load(pdfData.bytes);
-                const newPdfDoc = await PDFLib.PDFDocument.create();
-                const [copiedPage] = await newPdfDoc.copyPages(pdfDoc, [pageNumber - 1]);
-                newPdfDoc.addPage(copiedPage);
-                return await newPdfDoc.save();
-            } catch(err) {
-                throw new Error('Could not extract page: ' + err.message);
-            }
-        }
-
-        // ---------- PROCESS DATA ----------
-        $('processDataBtn').addEventListener('click', async function() {
-            if (!adminUnlocked) { lockAdmin(); return; }
-            if (!csvData && pdfFiles.length === 0) {
-                setAdminMsg('Please upload a CSV file or at least one PDF file.', 'error');
-                return;
-            }
-
-            progressContainer.style.display = 'block';
-            progressFill.style.width = '0%';
-            progressPercent.textContent = '0%';
-            progressText.textContent = 'Starting...';
-
-            try {
-                let csvEmployees = [];
-                if (csvData) {
-                    progressText.textContent = 'Reading CSV...';
-                    const csvText = await csvData.text();
-                    const lines = csvText.split('\n').filter(line => line.trim() !== '');
-                    if (lines.length > 1) {
-                        const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
-                        const empIdx = headers.indexOf('empid');
-                        const nameIdx = headers.indexOf('name');
-                        const passIdx = headers.indexOf('password');
-                        if (empIdx !== -1 && nameIdx !== -1) {
-                            for (let i = 1; i < lines.length; i++) {
-                                const cols = lines[i].split(',').map(c => c.trim());
-                                if (cols.length > Math.max(empIdx, nameIdx)) {
-                                    csvEmployees.push({
-                                        empId: cols[empIdx].trim(),
-                                        name: cols[nameIdx].trim(),
-                                        password: passIdx !== -1 && cols.length > passIdx ? cols[passIdx].trim() : ''
-                                    });
-                                }
-                            }
-                        } else {
-                            setAdminMsg('CSV must have empId, name, password columns.', 'error');
-                            progressContainer.style.display = 'none';
-                            return;
-                        }
-                    }
-                    progressFill.style.width = '10%';
-                    progressPercent.textContent = '10%';
-                }
-
-                let allPdfEmployees = [];
-                let totalPages = 0;
-                let processedPages = 0;
-
-                if (pdfFiles.length > 0) {
-                    progressText.textContent = `Processing ${pdfFiles.length} PDF(s)...`;
-                    for (let p = 0; p < pdfFiles.length; p++) {
-                        const pdfFile = pdfFiles[p];
-                        progressText.textContent = `Loading PDF ${p + 1}/${pdfFiles.length}: ${pdfFile.name}...`;
-                        const arrayBuffer = await pdfFile.arrayBuffer();
-                        const pdfBytes = new Uint8Array(arrayBuffer);
-                        pdfDataStore[pdfFile.name] = { bytes: pdfBytes.buffer, pages: 0 };
-
-                        const pdf = await pdfjsLib.getDocument({ data: pdfBytes }).promise;
-                        const pageCount = pdf.numPages;
-                        pdfDataStore[pdfFile.name].pages = pageCount;
-                        totalPages += pageCount;
-
-                        progressText.textContent = `Scanning ${pdfFile.name} (${pageCount} pages)...`;
-                        for (let i = 1; i <= pageCount; i++) {
-                            const page = await pdf.getPage(i);
-                            const textContent = await page.getTextContent();
-                            const pageText = textContent.items.map(item => item.str).join(' ');
-                            const empId = extractEmpId(pageText);
-                            if (empId) {
-                                const name = extractName(pageText) || `Employee ${i}`;
-                                allPdfEmployees.push({
-                                    empId: empId,
-                                    name: name,
-                                    pageNumber: i,
-                                    pdfFile: pdfFile.name
+        try {
+            let csvEmployees = [];
+            if (csvData) {
+                progressText.textContent = 'Reading CSV...';
+                const csvText = await csvData.text();
+                const lines = csvText.split('\n').filter(line => line.trim() !== '');
+                if (lines.length > 1) {
+                    const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+                    const empIdx = headers.indexOf('empid');
+                    const nameIdx = headers.indexOf('name');
+                    const passIdx = headers.indexOf('password');
+                    if (empIdx !== -1 && nameIdx !== -1) {
+                        for (let i = 1; i < lines.length; i++) {
+                            const cols = lines[i].split(',').map(c => c.trim());
+                            if (cols.length > Math.max(empIdx, nameIdx)) {
+                                csvEmployees.push({
+                                    empId: cols[empIdx].trim(),
+                                    name: cols[nameIdx].trim(),
+                                    password: passIdx !== -1 && cols.length > passIdx ? cols[passIdx].trim() : ''
                                 });
                             }
-                            processedPages++;
-                            const progress = 10 + (processedPages / (totalPages || 1)) * 70;
-                            progressFill.style.width = Math.min(progress, 80) + '%';
-                            progressPercent.textContent = Math.round(Math.min(progress, 80)) + '%';
-                            progressText.textContent = `Scanning ${pdfFile.name} - Page ${i}/${pageCount}...`;
                         }
+                    } else {
+                        setAdminMsg('CSV must have empId, name, password columns.', 'error');
+                        progressContainer.style.display = 'none';
+                        return;
                     }
                 }
+                progressFill.style.width = '10%';
+                progressPercent.textContent = '10%';
+            }
 
-                progressText.textContent = 'Merging data...';
-                progressFill.style.width = '85%';
-                progressPercent.textContent = '85%';
+            let allPdfEmployees = [];
+            let totalPages = 0;
+            let processedPages = 0;
 
-                let mergedData = [];
-                if (csvEmployees.length > 0) {
-                    mergedData = csvEmployees.map(emp => {
-                        const pdfMatch = allPdfEmployees.find(p => p.empId.toLowerCase() === emp.empId.toLowerCase());
-                        return {
-                            empId: emp.empId,
-                            name: emp.name || (pdfMatch ? pdfMatch.name : ''),
-                            password: emp.password || '',
-                            pageNumber: pdfMatch ? pdfMatch.pageNumber : null,
-                            pdfFile: pdfMatch ? pdfMatch.pdfFile : null
-                        };
-                    });
-                    allPdfEmployees.forEach(pdfEmp => {
-                        if (!mergedData.find(m => m.empId.toLowerCase() === pdfEmp.empId.toLowerCase())) {
-                            mergedData.push({
-                                empId: pdfEmp.empId,
-                                name: pdfEmp.name,
-                                password: '',
-                                pageNumber: pdfEmp.pageNumber,
-                                pdfFile: pdfEmp.pdfFile
+            if (pdfFiles.length > 0) {
+                progressText.textContent = `Processing ${pdfFiles.length} PDF(s)...`;
+                for (let p = 0; p < pdfFiles.length; p++) {
+                    const pdfFile = pdfFiles[p];
+                    progressText.textContent = `Loading PDF ${p + 1}/${pdfFiles.length}: ${pdfFile.name}...`;
+                    const arrayBuffer = await pdfFile.arrayBuffer();
+                    const pdfBytes = new Uint8Array(arrayBuffer);
+                    pdfDataStore[pdfFile.name] = { bytes: pdfBytes.buffer, pages: 0 };
+
+                    const pdf = await pdfjsLib.getDocument({ data: pdfBytes }).promise;
+                    const pageCount = pdf.numPages;
+                    pdfDataStore[pdfFile.name].pages = pageCount;
+                    totalPages += pageCount;
+
+                    progressText.textContent = `Scanning ${pdfFile.name} (${pageCount} pages)...`;
+                    for (let i = 1; i <= pageCount; i++) {
+                        const page = await pdf.getPage(i);
+                        const textContent = await page.getTextContent();
+                        const pageText = textContent.items.map(item => item.str).join(' ');
+                        const empId = extractEmpId(pageText);
+                        if (empId) {
+                            const name = extractName(pageText) || `Employee ${i}`;
+                            allPdfEmployees.push({
+                                empId: empId,
+                                name: name,
+                                pageNumber: i,
+                                pdfFile: pdfFile.name
                             });
                         }
-                    });
-                } else {
-                    mergedData = allPdfEmployees.map(e => ({ ...e, password: '' }));
+                        processedPages++;
+                        const progress = 10 + (processedPages / (totalPages || 1)) * 70;
+                        progressFill.style.width = Math.min(progress, 80) + '%';
+                        progressPercent.textContent = Math.round(Math.min(progress, 80)) + '%';
+                        progressText.textContent = `Scanning ${pdfFile.name} - Page ${i}/${pageCount}...`;
+                    }
                 }
-
-                employeeData = mergedData;
-                
-                // Save to server
-                const saved = await saveDataToServer(employeeData, pdfDataStore);
-                if (!saved) {
-                    setAdminMsg('❌ Failed to save data to server. Please check server connection.', 'error');
-                    progressContainer.style.display = 'none';
-                    return;
-                }
-
-                progressFill.style.width = '100%';
-                progressPercent.textContent = '100%';
-                progressText.textContent = '✅ Complete!';
-                setAdminMsg(`✅ Successfully processed ${employeeData.length} employees from ${pdfFiles.length} PDF(s).`, 'success');
-
-                setTimeout(() => { progressContainer.style.display = 'none'; }, 2000);
-
-            } catch(err) {
-                console.error(err);
-                setAdminMsg('❌ Error processing: ' + err.message, 'error');
-                progressContainer.style.display = 'none';
             }
-        });
 
-        // ---------- REFRESH DATA ----------
-        $('refreshDataBtn').addEventListener('click', async function() {
-            if (!adminUnlocked) { lockAdmin(); return; }
-            await loadDataFromServer();
-            setAdminMsg('🔄 Data refreshed from server.', 'success');
-        });
+            progressText.textContent = 'Merging data...';
+            progressFill.style.width = '85%';
+            progressPercent.textContent = '85%';
 
-        // ---------- DOWNLOAD SAMPLE CSV ----------
-        $('downloadSampleBtn').addEventListener('click', function() {
-            if (!adminUnlocked) { lockAdmin(); return; }
-            const csvContent = `empId,name,password
-    TXIX11906,Rizwan Khan,pass123
-    TXIX12095,NIKHIL KUMAR,nikhil@2024
-    T1UB16432,Avnish Kumar,avnish#99
-    TXIX13081,SACHIN BAISOYA,sachin!88`;
-            const blob = new Blob([csvContent], { type: 'text/csv' });
+            let mergedData = [];
+            if (csvEmployees.length > 0) {
+                mergedData = csvEmployees.map(emp => {
+                    const pdfMatch = allPdfEmployees.find(p => p.empId.toLowerCase() === emp.empId.toLowerCase());
+                    return {
+                        empId: emp.empId,
+                        name: emp.name || (pdfMatch ? pdfMatch.name : ''),
+                        password: emp.password || '',
+                        pageNumber: pdfMatch ? pdfMatch.pageNumber : null,
+                        pdfFile: pdfMatch ? pdfMatch.pdfFile : null
+                    };
+                });
+                allPdfEmployees.forEach(pdfEmp => {
+                    if (!mergedData.find(m => m.empId.toLowerCase() === pdfEmp.empId.toLowerCase())) {
+                        mergedData.push({
+                            empId: pdfEmp.empId,
+                            name: pdfEmp.name,
+                            password: '',
+                            pageNumber: pdfEmp.pageNumber,
+                            pdfFile: pdfEmp.pdfFile
+                        });
+                    }
+                });
+            } else {
+                mergedData = allPdfEmployees.map(e => ({ ...e, password: '' }));
+            }
+
+            employeeData = mergedData;
+            
+            // Save to server with all data
+            const saved = await saveDataToServer(employeeData, pdfDataStore, { testMode: testModeToggle.checked });
+            if (!saved) {
+                setAdminMsg('❌ Failed to save data to server.', 'error');
+                progressContainer.style.display = 'none';
+                return;
+            }
+
+            // Clear uploaded files after processing
+            pdfFiles = [];
+            csvData = null;
+            csvFileName.textContent = '';
+            updatePdfFileList();
+            csvUploadBox.classList.remove('has-file');
+
+            progressFill.style.width = '100%';
+            progressPercent.textContent = '100%';
+            progressText.textContent = '✅ Complete!';
+            setAdminMsg(`✅ Successfully processed ${employeeData.length} employees.`, 'success');
+
+            setTimeout(() => { progressContainer.style.display = 'none'; }, 2000);
+            renderEmployeeList();
+
+        } catch(err) {
+            console.error(err);
+            setAdminMsg('❌ Error processing: ' + err.message, 'error');
+            progressContainer.style.display = 'none';
+        }
+    });
+
+    // ---------- REFRESH DATA ----------
+    $('refreshDataBtn').addEventListener('click', async function() {
+        if (!adminUnlocked) { lockAdmin(); return; }
+        await loadDataFromServer();
+        setAdminMsg('🔄 Data refreshed from server.', 'success');
+    });
+
+    // ---------- DOWNLOAD SAMPLE CSV ----------
+    $('downloadSampleBtn').addEventListener('click', function() {
+        if (!adminUnlocked) { lockAdmin(); return; }
+        const csvContent = `empId,name,password
+TXIX11906,Rizwan Khan,pass123
+TXIX12095,NIKHIL KUMAR,nikhil@2024
+T1UB16432,Avnish Kumar,avnish#99
+TXIX13081,SACHIN BAISOYA,sachin!88`;
+        const blob = new Blob([csvContent], { type: 'text/csv' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = 'sample-employee-data.csv';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(link.href);
+        setAdminMsg('✅ Sample CSV downloaded successfully!', 'success');
+    });
+
+    // ---------- CLEAR ALL ----------
+    $('clearAllData').addEventListener('click', async function() {
+        if (!adminUnlocked) { lockAdmin(); return; }
+        if (confirm('⚠️ Delete all employee data? This cannot be undone.')) {
+            employeeData = [];
+            pdfDataStore = {};
+            pdfFiles = [];
+            csvData = null;
+            csvFileName.textContent = '';
+            updatePdfFileList();
+            csvUploadBox.classList.remove('has-file');
+            
+            await saveDataToServer(employeeData, {}, { testMode: testModeToggle.checked });
+            renderEmployeeList();
+            setAdminMsg('🗑️ All data cleared.');
+            currentUser = null;
+            payslipArea.classList.remove('show');
+            dummyPasswordDisplay.classList.remove('show');
+            setUserMsg('Data cleared. Please upload new data.');
+        }
+    });
+
+    // ---------- CSV + PDF FILE HANDLERS ----------
+    $('csvFileInput').addEventListener('change', function(e) {
+        if (!adminUnlocked) { lockAdmin(); return; }
+        const file = e.target.files[0];
+        if (file) {
+            csvFileName.textContent = '📄 ' + file.name;
+            csvUploadBox.classList.add('has-file');
+            csvData = file;
+        }
+    });
+
+    $('pdfFileInput').addEventListener('change', function(e) {
+        if (!adminUnlocked) { lockAdmin(); return; }
+        const files = e.target.files;
+        if (files.length > 0) {
+            for (const file of files) {
+                if (file.type === 'application/pdf') {
+                    if (!pdfFiles.find(f => f.name === file.name && f.size === file.size)) {
+                        pdfFiles.push(file);
+                    }
+                }
+            }
+            updatePdfFileList();
+        }
+    });
+
+    // ---------- TEST MODE TOGGLE ----------
+    testModeToggle.addEventListener('change', function() {
+        if (!adminUnlocked) { lockAdmin(); return; }
+        updateTestModeStatus();
+        payslipArea.classList.remove('show');
+        if (testModeToggle.checked) {
+            dummyPasswordDisplay.classList.add('show');
+        } else {
+            dummyPasswordDisplay.classList.remove('show');
+        }
+        if (currentUser) {
+            updateDummyPasswordHint(currentUser);
+        }
+    });
+
+    // ---------- USER: LOGIN WITH PASSWORD ----------
+    $('loginWithPasswordBtn').addEventListener('click', async function() {
+        await loadDataFromServer();
+        
+        const empId = userEmpId.value.trim();
+        const password = userPassword.value.trim();
+        if (!empId) { setUserMsg('Please enter Employee ID.', 'error'); return; }
+        if (!password) { setUserMsg('Please enter your password.', 'error'); return; }
+
+        const emp = findEmployee(empId);
+        if (!emp) { setUserMsg(`❌ No employee found with ID: ${empId}`, 'error'); return; }
+
+        let passOk = false;
+        if (testModeToggle.checked && (!emp.password || emp.password.length === 0)) {
+            passOk = true;
+        } else {
+            passOk = (password === emp.password);
+        }
+
+        if (!passOk) {
+            setUserMsg('❌ Incorrect password. Please try again.', 'error');
+            return;
+        }
+
+        currentUser = emp;
+        setUserMsg(`✅ Login successful! Welcome ${emp.name || emp.empId}.`, 'success');
+        await showPayslip(emp);
+        updateDummyPasswordHint(emp);
+    });
+
+    // ---------- SHOW PAYSLIP ----------
+    async function showPayslip(user) {
+        if (!user) { setUserMsg('No user data available.', 'error'); return; }
+
+        payslipEmpName.textContent = user.name || user.empId;
+        payslipEmpIdSpan.textContent = user.empId;
+
+        if (user.pageNumber && user.pdfFile && pdfDataStore[user.pdfFile]) {
+            try {
+                setUserMsg('⏳ Extracting your payslip...');
+                const pdfBytes = await extractPageFromPdf(user.pdfFile, user.pageNumber);
+                const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+                payslipArea.dataset.pdfBlobUrl = URL.createObjectURL(blob);
+                payslipArea.dataset.pdfName = `payslip_${user.empId}.pdf`;
+                payslipFileSize.textContent = formatSize(pdfBytes.length);
+                payslipArea.classList.add('show');
+                setUserMsg('✅ Payslip ready for download!', 'success');
+            } catch(err) {
+                setUserMsg('⚠️ Could not extract payslip: ' + err.message, 'error');
+                payslipArea.classList.remove('show');
+            }
+        } else if (user.pageNumber) {
+            setUserMsg('⚠️ PDF data not found. Please contact admin.', 'error');
+            payslipArea.classList.remove('show');
+        } else {
+            setUserMsg('⚠️ No payslip found for this employee.', 'error');
+            payslipArea.classList.remove('show');
+        }
+    }
+
+    // ---------- DOWNLOAD PDF ----------
+    downloadBtn.addEventListener('click', function() {
+        const pdfBlobUrl = payslipArea.dataset.pdfBlobUrl;
+        const pdfName = payslipArea.dataset.pdfName || 'payslip.pdf';
+        if (!pdfBlobUrl) { setUserMsg('No PDF available to download.', 'error'); return; }
+        try {
             const link = document.createElement('a');
-            link.href = URL.createObjectURL(blob);
-            link.download = 'sample-employee-data.csv';
+            link.href = pdfBlobUrl;
+            link.download = pdfName;
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
-            URL.revokeObjectURL(link.href);
-            setAdminMsg('✅ Sample CSV downloaded successfully!', 'success');
-        });
+            setUserMsg(`✅ Downloading ${pdfName}`, 'success');
+        } catch(err) {
+            setUserMsg('❌ Error downloading: ' + err.message, 'error');
+        }
+    });
 
-        // ---------- CLEAR ALL ----------
-        $('clearAllData').addEventListener('click', async function() {
-            if (!adminUnlocked) { lockAdmin(); return; }
-            if (confirm('⚠️ Delete all employee data? This cannot be undone.')) {
-                employeeData = [];
-                pdfDataStore = {};
-                pdfFiles = [];
-                csvData = null;
-                csvFileName.textContent = '';
-                pdfFileName.textContent = '';
-                pdfFileList.innerHTML = '';
-                pdfCount.textContent = '0';
-                csvUploadBox.classList.remove('has-file');
-                pdfUploadBox.classList.remove('has-file');
-                
-                await saveDataToServer(employeeData, {});
-                renderEmployeeList();
-                setAdminMsg('🗑️ All data cleared.');
-                currentUser = null;
-                payslipArea.classList.remove('show');
-                dummyPasswordDisplay.classList.remove('show');
-                setUserMsg('Data cleared. Please upload new data.');
-            }
-        });
+    // ---------- CHECK USER STATUS ----------
+    $('checkUserStatus').addEventListener('click', async function() {
+        await loadDataFromServer();
+        const empId = userEmpId.value.trim();
+        if (!empId) { setUserMsg('Enter Employee ID.', 'error'); return; }
+        const emp = findEmployee(empId);
+        if (!emp) { setUserMsg(`No record for ${empId}`, 'error'); return; }
+        const hasPdf = emp.pageNumber ? `✅ Page ${emp.pageNumber}${emp.pdfFile ? ' (' + emp.pdfFile + ')' : ''}` : '❌ No PDF';
+        const hasPass = emp.password ? '✅ Set' : '❌ Not set';
+        setUserMsg(`✅ Found: ${emp.name} | Password: ${hasPass} | PDF: ${hasPdf}`, 'success');
+        if (testModeToggle.checked) {
+            const hint = emp.password || 'dummy123';
+            dummyPasswordHint.textContent = hint;
+            dummyPasswordDisplay.classList.add('show');
+        } else {
+            dummyPasswordDisplay.classList.remove('show');
+        }
+    });
 
-        // ---------- CSV + PDF FILE HANDLERS ----------
-        $('csvFileInput').addEventListener('change', function(e) {
-            if (!adminUnlocked) { lockAdmin(); return; }
-            const file = e.target.files[0];
-            if (file) {
-                csvFileName.textContent = '📄 ' + file.name;
-                csvUploadBox.classList.add('has-file');
-                csvData = file;
-            }
-        });
-
-        $('pdfFileInput').addEventListener('change', function(e) {
-            if (!adminUnlocked) { lockAdmin(); return; }
-            const files = e.target.files;
-            if (files.length > 0) {
-                for (const file of files) {
-                    if (file.type === 'application/pdf') {
-                        if (!pdfFiles.find(f => f.name === file.name && f.size === file.size)) {
-                            pdfFiles.push(file);
-                        }
-                    }
-                }
-                updatePdfFileList();
-            }
-        });
-
-        // ---------- TEST MODE TOGGLE ----------
-        testModeToggle.addEventListener('change', function() {
-            if (!adminUnlocked) { lockAdmin(); return; }
-            updateTestModeStatus();
-            payslipArea.classList.remove('show');
-            if (testModeToggle.checked) {
-                dummyPasswordDisplay.classList.add('show');
-            } else {
-                dummyPasswordDisplay.classList.remove('show');
-            }
-            if (currentUser) {
-                updateDummyPasswordHint(currentUser);
-            }
-        });
-
-        // ---------- USER: LOGIN WITH PASSWORD ----------
-        $('loginWithPasswordBtn').addEventListener('click', async function() {
-            // Refresh data before login to ensure latest data
-            await loadDataFromServer();
-            
-            const empId = userEmpId.value.trim();
-            const password = userPassword.value.trim();
-            if (!empId) { setUserMsg('Please enter Employee ID.', 'error'); return; }
-            if (!password) { setUserMsg('Please enter your password.', 'error'); return; }
-
-            const emp = findEmployee(empId);
-            if (!emp) { setUserMsg(`❌ No employee found with ID: ${empId}`, 'error'); return; }
-
-            let passOk = false;
-            if (testModeToggle.checked && (!emp.password || emp.password.length === 0)) {
-                passOk = true;
-            } else {
-                passOk = (password === emp.password);
-            }
-
-            if (!passOk) {
-                setUserMsg('❌ Incorrect password. Please try again.', 'error');
+    // ---------- TAB SWITCHING ----------
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            if (this.dataset.tab === 'tab-admin' && !adminUnlocked) {
+                lockAdmin();
                 return;
             }
-
-            currentUser = emp;
-            setUserMsg(`✅ Login successful! Welcome ${emp.name || emp.empId}.`, 'success');
-            await showPayslip(emp);
-            updateDummyPasswordHint(emp);
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+            const panelId = this.dataset.tab;
+            document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+            document.getElementById(panelId).classList.add('active');
         });
+    });
 
-        // ---------- SHOW PAYSLIP ----------
-        async function showPayslip(user) {
-            if (!user) { setUserMsg('No user data available.', 'error'); return; }
+    // ---------- INIT ----------
+    async function init() {
+        adminUnlocked = false;
+        adminLockOverlay.classList.add('hidden');
+        if (adminTabBtn) adminTabBtn.classList.remove('visible');
+        adminToggleLink.style.display = 'flex';
 
-            payslipEmpName.textContent = user.name || user.empId;
-            payslipEmpIdSpan.textContent = user.empId;
-
-            if (user.pageNumber && user.pdfFile && pdfDataStore[user.pdfFile]) {
-                try {
-                    setUserMsg('⏳ Extracting your payslip...');
-                    const pdfBytes = await extractPageFromPdf(user.pdfFile, user.pageNumber);
-                    const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-                    payslipArea.dataset.pdfBlobUrl = URL.createObjectURL(blob);
-                    payslipArea.dataset.pdfName = `payslip_${user.empId}.pdf`;
-                    payslipFileSize.textContent = formatSize(pdfBytes.length);
-                    payslipArea.classList.add('show');
-                    setUserMsg('✅ Payslip ready for download!', 'success');
-                } catch(err) {
-                    setUserMsg('⚠️ Could not extract payslip: ' + err.message, 'error');
-                    payslipArea.classList.remove('show');
-                }
-            } else if (user.pageNumber) {
-                setUserMsg('⚠️ PDF data not found. Please re-upload the payslip PDF.', 'error');
-                payslipArea.classList.remove('show');
-            } else {
-                setUserMsg('⚠️ No payslip found for this employee.', 'error');
-                payslipArea.classList.remove('show');
-            }
-        }
-
-        // ---------- DOWNLOAD PDF ----------
-        downloadBtn.addEventListener('click', function() {
-            const pdfBlobUrl = payslipArea.dataset.pdfBlobUrl;
-            const pdfName = payslipArea.dataset.pdfName || 'payslip.pdf';
-            if (!pdfBlobUrl) { setUserMsg('No PDF available to download.', 'error'); return; }
-            try {
-                const link = document.createElement('a');
-                link.href = pdfBlobUrl;
-                link.download = pdfName;
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-                setUserMsg(`✅ Downloading ${pdfName}`, 'success');
-            } catch(err) {
-                setUserMsg('❌ Error downloading: ' + err.message, 'error');
-            }
-        });
-
-        // ---------- CHECK USER STATUS ----------
-        $('checkUserStatus').addEventListener('click', async function() {
-            await loadDataFromServer();
-            const empId = userEmpId.value.trim();
-            if (!empId) { setUserMsg('Enter Employee ID.', 'error'); return; }
-            const emp = findEmployee(empId);
-            if (!emp) { setUserMsg(`No record for ${empId}`, 'error'); return; }
-            const hasPdf = emp.pageNumber ? `✅ Page ${emp.pageNumber}${emp.pdfFile ? ' (' + emp.pdfFile + ')' : ''}` : '❌ No PDF';
-            const hasPass = emp.password ? '✅ Set' : '❌ Not set';
-            setUserMsg(`✅ Found: ${emp.name} | Password: ${hasPass} | PDF: ${hasPdf}`, 'success');
-            if (testModeToggle.checked) {
-                const hint = emp.password || 'dummy123';
-                dummyPasswordHint.textContent = hint;
-                dummyPasswordDisplay.classList.add('show');
-            } else {
-                dummyPasswordDisplay.classList.remove('show');
-            }
-        });
-
-        // ---------- TAB SWITCHING ----------
-        document.querySelectorAll('.tab-btn').forEach(btn => {
-            btn.addEventListener('click', function() {
-                if (this.dataset.tab === 'tab-admin' && !adminUnlocked) {
-                    lockAdmin();
-                    return;
-                }
-                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-                this.classList.add('active');
-                const panelId = this.dataset.tab;
-                document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-                document.getElementById(panelId).classList.add('active');
-            });
-        });
-
-        // ---------- INIT ----------
-        async function init() {
-            // Start with locked state
-            adminUnlocked = false;
-            adminLockOverlay.classList.add('hidden');
-            if (adminTabBtn) adminTabBtn.classList.remove('visible');
-            adminToggleLink.style.display = 'flex';
-
-            // Load initial data
-            await loadDataFromServer();
-            
+        // Load data from server
+        await loadDataFromServer();
+        
+        // Ensure test mode is OFF by default
+        if (!testModeToggle.checked) {
             updateTestModeStatus();
-            
-            setAdminMsg(`📦 ${employeeData.length} employee records loaded from server. Upload CSV and/or PDFs to add data.`);
-            setUserMsg('Enter Employee ID and password to download payslip.');
-            
-            // Start auto-refresh for multi-device support
-            startAutoRefresh();
-            
-            console.log('📄 Multi-device payslip system running.');
-            console.log('🔬 Test Mode: if no password, dummy password is accepted.');
-            console.log('🔄 Auto-refresh enabled. Data syncs every 5 seconds.');
         }
+        
+        setAdminMsg(`📦 ${employeeData.length} employee records loaded. Upload CSV and/or PDFs to add data.`);
+        setUserMsg('Enter Employee ID and password to download payslip.');
+        
+        // Start auto-refresh for multi-device sync
+        startAutoRefresh();
+        
+        console.log('📄 Multi-device payslip system running.');
+        console.log('🔒 Test Mode: OFF by default.');
+        console.log('🔄 Auto-refresh enabled. Data syncs every 5 seconds.');
+        console.log('💾 Data persists across refreshes!');
+    }
 
-        // Make sure default tab is user
-        userTabBtn.classList.add('active');
-        document.getElementById('tab-user').classList.add('active');
-        document.getElementById('tab-admin').classList.remove('active');
+    // Make sure default tab is user
+    userTabBtn.classList.add('active');
+    document.getElementById('tab-user').classList.add('active');
+    document.getElementById('tab-admin').classList.remove('active');
 
-        init();
-    })();
+    init();
+})();
 </script>
 </body>
 </html>

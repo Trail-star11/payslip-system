@@ -86,6 +86,48 @@ try {
     console.log('✅ Created fresh data file');
 }
 
+// Backup data function
+function backupData() {
+    try {
+        if (fs.existsSync(FINAL_DATA_FILE)) {
+            const backupDir = path.join(activeDataDir, 'backups');
+            if (!fs.existsSync(backupDir)) {
+                fs.mkdirSync(backupDir, { recursive: true });
+            }
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+            const backupFile = path.join(backupDir, `data-${timestamp}.json`);
+            fs.copyFileSync(FINAL_DATA_FILE, backupFile);
+            console.log(`📦 Backup created: ${backupFile}`);
+            
+            // Keep only last 5 backups
+            const files = fs.readdirSync(backupDir).filter(f => f.startsWith('data-')).sort();
+            while (files.length > 5) {
+                const oldFile = path.join(backupDir, files.shift());
+                fs.unlinkSync(oldFile);
+                console.log(`🗑️ Removed old backup: ${oldFile}`);
+            }
+        }
+    } catch (error) {
+        console.error('❌ Backup failed:', error);
+    }
+}
+
+// Run backup every hour
+setInterval(backupData, 3600000);
+
+// Also backup on shutdown
+process.on('SIGINT', () => {
+    console.log('📦 Creating backup before shutdown...');
+    backupData();
+    process.exit();
+});
+
+process.on('SIGTERM', () => {
+    console.log('📦 Creating backup before shutdown...');
+    backupData();
+    process.exit();
+});
+
 // Middleware
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ extended: true, limit: '100mb' }));
@@ -228,6 +270,7 @@ app.listen(PORT, '0.0.0.0', () => {
         const data = JSON.parse(fs.readFileSync(FINAL_DATA_FILE, 'utf8'));
         console.log(`👥 Employees: ${data.employees ? data.employees.length : 0}`);
         console.log(`📄 PDFs: ${data.pdfs ? Object.keys(data.pdfs).length : 0}`);
+        console.log(`📅 Last updated: ${data.lastUpdated || 'Never'}`);
     } catch (error) {
         console.log('⚠️ Could not read data file stats');
     }

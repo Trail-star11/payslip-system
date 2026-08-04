@@ -341,7 +341,7 @@
 
         <div class="form-group">
             <label><i class="fas fa-id-badge"></i> Employee ID</label>
-            <input type="text" id="userEmpId" placeholder="e.g. PPRR0*********" />
+            <input type="text" id="userEmpId" placeholder="e.g. PPRR00476907" />
         </div>
         <div class="form-group">
             <label><i class="fas fa-lock"></i> Password</label>
@@ -488,13 +488,12 @@
                     console.log(`📄 Loaded ${loadedCount} PDFs from server`);
                 }
                 
-                // Load settings (test mode) - ONLY if not already saved locally
-                if (!isTestModeSaved) {
-                    if (data.settings && data.settings.testMode !== undefined) {
-                        testModeToggle.checked = data.settings.testMode;
-                    } else {
-                        testModeToggle.checked = false;
-                    }
+                // ✅ FIX: Load settings (test mode) - Default to OFF
+                if (data.settings && data.settings.testMode !== undefined) {
+                    testModeToggle.checked = data.settings.testMode;
+                } else {
+                    // ✅ FIX: Default to OFF if not set
+                    testModeToggle.checked = false;
                 }
                 updateTestModeStatus();
                 
@@ -503,8 +502,9 @@
                 
                 // Show last updated time
                 const lastUpdated = data.lastUpdated || data._meta?.lastUpdated || 'unknown';
+                const testModeStatus = data.settings?.testMode ? 'ON' : 'OFF';
                 if (adminUnlocked) {
-                    setAdminMsg(`✅ Loaded ${employeeData.length} employee records and ${Object.keys(pdfDataStore).length} PDFs from server. Last updated: ${lastUpdated !== 'unknown' ? new Date(lastUpdated).toLocaleString() : 'Never'}`, 'success');
+                    setAdminMsg(`✅ Loaded ${employeeData.length} employee records and ${Object.keys(pdfDataStore).length} PDFs from server. Last updated: ${lastUpdated !== 'unknown' ? new Date(lastUpdated).toLocaleString() : 'Never'}. Test Mode: ${testModeStatus}`, 'success');
                 }
                 return true;
             }
@@ -572,6 +572,11 @@
                 data.settings = { testMode: testModeToggle.checked };
             }
             
+            // ✅ FIX: Ensure testMode is explicitly set
+            if (data.settings.testMode === undefined || data.settings.testMode === null) {
+                data.settings.testMode = false;
+            }
+            
             // Add timestamp
             data.lastUpdated = new Date().toISOString();
             
@@ -580,6 +585,7 @@
                 body: JSON.stringify(data)
             });
             console.log('✅ Data saved successfully');
+            console.log(`🔒 Test Mode saved as: ${data.settings.testMode ? 'ON' : 'OFF'}`);
             return true;
         } catch (error) {
             console.error('❌ Error saving data:', error);
@@ -697,13 +703,17 @@
         if (type) userStatus.classList.add(type);
     }
 
+    // ✅ FIX: Update test mode status - ensures UI reflects server state
     function updateTestModeStatus() {
-        if (testModeToggle.checked) {
+        const isTestModeOn = testModeToggle.checked;
+        
+        if (isTestModeOn) {
             testModeStatus.textContent = '🔬 ON';
             testModeStatus.className = 'badge badge-test-on';
             if (adminUnlocked) {
                 setAdminMsg('🔬 Test Mode ENABLED. Employees can use their Employee ID as password.', 'warning');
             }
+            // Show dummy password if a user is loaded or ID is entered
             const empId = userEmpId.value.trim();
             if (empId) {
                 const emp = findEmployee(empId);
@@ -997,7 +1007,9 @@
 
             employeeData = mergedData;
             
-            const saved = await saveDataToServer(employeeData, pdfDataStore, { testMode: testModeToggle.checked });
+            // ✅ FIX: Ensure testMode is preserved when saving
+            const currentTestMode = testModeToggle.checked;
+            const saved = await saveDataToServer(employeeData, pdfDataStore, { testMode: currentTestMode });
             if (!saved) {
                 setAdminMsg('❌ Failed to save data to server.', 'error');
                 progressContainer.style.display = 'none';
@@ -1013,7 +1025,7 @@
             progressFill.style.width = '100%';
             progressPercent.textContent = '100%';
             progressText.textContent = '✅ Complete!';
-            setAdminMsg(`✅ Successfully processed ${employeeData.length} employees with ${Object.keys(pdfDataStore).length} PDF(s).`, 'success');
+            setAdminMsg(`✅ Successfully processed ${employeeData.length} employees with ${Object.keys(pdfDataStore).length} PDF(s). Test Mode: ${currentTestMode ? 'ON' : 'OFF'}`, 'success');
 
             setTimeout(() => { progressContainer.style.display = 'none'; }, 2000);
             renderEmployeeList();
@@ -1064,7 +1076,9 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
             updatePdfFileList();
             csvUploadBox.classList.remove('has-file');
             
-            await saveDataToServer(employeeData, {}, { testMode: testModeToggle.checked });
+            // ✅ FIX: Preserve test mode when clearing
+            const currentTestMode = testModeToggle.checked;
+            await saveDataToServer(employeeData, {}, { testMode: currentTestMode });
             renderEmployeeList();
             setAdminMsg('🗑️ All data cleared.');
             currentUser = null;
@@ -1122,6 +1136,7 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
             updateDummyPasswordHint(currentUser);
         }
         
+        // ✅ FIX: Save test mode state to server
         saveDataToServer(employeeData, null, { testMode: testModeToggle.checked });
         
         setTimeout(() => {
@@ -1292,11 +1307,13 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
 
         await loadDataFromServer(true);
         
+        // ✅ FIX: Ensure test mode is OFF by default
         if (!testModeToggle.checked) {
+            testModeToggle.checked = false;
             updateTestModeStatus();
         }
         
-        setAdminMsg(`📦 ${employeeData.length} employee records, ${Object.keys(pdfDataStore).length} PDFs loaded.`, '');
+        setAdminMsg(`📦 ${employeeData.length} employee records, ${Object.keys(pdfDataStore).length} PDFs loaded. Test Mode: ${testModeToggle.checked ? 'ON' : 'OFF'}`, '');
         setUserMsg('Enter Employee ID and password to download payslip.');
         
         startAutoRefresh();
@@ -1304,9 +1321,10 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
         console.log('📄 Multi-device payslip system running.');
         console.log(`📊 ${employeeData.length} employees loaded`);
         console.log(`📄 ${Object.keys(pdfDataStore).length} PDFs loaded`);
-        console.log('🔒 Test Mode: OFF by default.');
+        console.log(`🔒 Test Mode: ${testModeToggle.checked ? 'ON' : 'OFF'}`);
         console.log('💾 Data persists across refreshes!');
         console.log('🔑 Dummy password = Employee ID (when Test Mode is ON)');
+        console.log('✅ Test Mode will NOT auto-enable without admin permission.');
     }
 
     userTabBtn.classList.add('active');

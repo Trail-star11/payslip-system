@@ -341,7 +341,7 @@
 
         <div class="form-group">
             <label><i class="fas fa-id-badge"></i> Employee ID</label>
-            <input type="text" id="userEmpId" placeholder="e.g. PPRR0********" />
+            <input type="text" id="userEmpId" placeholder="e.g. PPRR0*********" />
         </div>
         <div class="form-group">
             <label><i class="fas fa-lock"></i> Password</label>
@@ -459,12 +459,14 @@
         try {
             console.log('📥 Loading data from server...');
             const data = await apiCall('/data');
+            
             if (data && data.employees) {
                 employeeData = data.employees;
                 
                 // Load PDF data from server
                 if (data.pdfs) {
                     pdfDataStore = {};
+                    let loadedCount = 0;
                     for (const [filename, pdfData] of Object.entries(data.pdfs)) {
                         if (pdfData.bytes) {
                             try {
@@ -477,13 +479,13 @@
                                     bytes: bytes.buffer,
                                     pages: pdfData.pages || 0
                                 };
-                                console.log(`✅ Loaded PDF: ${filename} (${pdfData.pages || 0} pages)`);
+                                loadedCount++;
                             } catch(e) {
                                 console.error(`❌ Failed to load PDF ${filename}:`, e);
                             }
                         }
                     }
-                    console.log(`📄 Loaded ${Object.keys(pdfDataStore).length} PDFs from server`);
+                    console.log(`📄 Loaded ${loadedCount} PDFs from server`);
                 }
                 
                 // Load settings (test mode) - ONLY if not already saved locally
@@ -499,16 +501,18 @@
                 renderEmployeeList();
                 dataLoaded = true;
                 
+                // Show last updated time
+                const lastUpdated = data.lastUpdated || data._meta?.lastUpdated || 'unknown';
                 if (adminUnlocked) {
-                    setAdminMsg(`✅ Loaded ${employeeData.length} employee records and ${Object.keys(pdfDataStore).length} PDFs from server.`, 'success');
+                    setAdminMsg(`✅ Loaded ${employeeData.length} employee records and ${Object.keys(pdfDataStore).length} PDFs from server. Last updated: ${lastUpdated !== 'unknown' ? new Date(lastUpdated).toLocaleString() : 'Never'}`, 'success');
                 }
                 return true;
             }
             return false;
         } catch (error) {
-            console.error('Error loading data:', error);
+            console.error('❌ Error loading data:', error);
             if (adminUnlocked) {
-                setAdminMsg('⚠️ Could not connect to server. Make sure the server is running.', 'error');
+                setAdminMsg('⚠️ Could not connect to server. Data may be lost on restart.', 'error');
             }
             return false;
         } finally {
@@ -568,6 +572,9 @@
                 data.settings = { testMode: testModeToggle.checked };
             }
             
+            // Add timestamp
+            data.lastUpdated = new Date().toISOString();
+            
             const result = await apiCall('/data', {
                 method: 'POST',
                 body: JSON.stringify(data)
@@ -575,7 +582,7 @@
             console.log('✅ Data saved successfully');
             return true;
         } catch (error) {
-            console.error('Error saving data:', error);
+            console.error('❌ Error saving data:', error);
             setAdminMsg('⚠️ Could not save data to server.', 'error');
             return false;
         }
@@ -723,10 +730,10 @@
         return (bytes / 1048576).toFixed(1) + ' MB';
     }
 
-    // DUMMY PASSWORD = EMPLOYEE ID (no extra characters)
+    // DUMMY PASSWORD = EMPLOYEE ID
     function getDummyPassword(emp) {
         if (emp && emp.empId) {
-            return emp.empId; // Password is exactly the Employee ID
+            return emp.empId;
         }
         return 'dummy123';
     }
@@ -1138,7 +1145,6 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
         let loginMessage = '';
         
         if (testModeToggle.checked) {
-            // DUMMY PASSWORD = EMPLOYEE ID (exact match)
             const dummyPass = getDummyPassword(emp);
             if (password === emp.password || password === dummyPass) {
                 passOk = true;

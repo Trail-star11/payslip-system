@@ -59,17 +59,26 @@ function initializeDataFile() {
             const content = fs.readFileSync(DATA_FILE, 'utf8');
             const data = JSON.parse(content);
             
-            // ✅ FIX: Ensure settings exists and testMode is explicitly false
+            // Ensure settings exists
             if (!data.settings) {
                 data.settings = { testMode: false };
             }
-            // ✅ FIX: Explicitly ensure testMode is false if not set
             if (data.settings.testMode === undefined || data.settings.testMode === null) {
                 data.settings.testMode = false;
             }
             
-            console.log(`✅ Data file loaded: ${data.employees ? data.employees.length : 0} employees, ${data.pdfs ? Object.keys(data.pdfs).length : 0} PDFs`);
+            // Log PDF info
+            const pdfCount = data.pdfs ? Object.keys(data.pdfs).length : 0;
+            console.log(`✅ Data file loaded: ${data.employees ? data.employees.length : 0} employees, ${pdfCount} PDFs`);
             console.log(`🔒 Test Mode: ${data.settings.testMode ? 'ON' : 'OFF'}`);
+            
+            // Log PDF sizes
+            if (data.pdfs) {
+                for (const [name, pdf] of Object.entries(data.pdfs)) {
+                    const size = pdf.bytes ? (pdf.bytes.length * 0.75 / 1024 / 1024).toFixed(2) : 0;
+                    console.log(`   📄 ${name}: ${pdf.pages || 0} pages, ${size}MB (base64)`);
+                }
+            }
             return data;
         }
     } catch (error) {
@@ -81,7 +90,6 @@ function initializeDataFile() {
                 const content = fs.readFileSync(backupFile, 'utf8');
                 const data = JSON.parse(content);
                 
-                // ✅ FIX: Ensure settings exists and testMode is explicitly false
                 if (!data.settings) {
                     data.settings = { testMode: false };
                 }
@@ -99,7 +107,7 @@ function initializeDataFile() {
         }
     }
     
-    // ✅ FIX: Create new data file with testMode OFF
+    // Create new data file
     const initialData = {
         employees: [],
         pdfs: {},
@@ -118,7 +126,7 @@ let dataCache = initializeDataFile();
 // Function to save data (with multiple redundancy)
 function saveData(data) {
     try {
-        // ✅ FIX: Ensure settings exists before saving
+        // Ensure settings exists
         if (!data.settings) {
             data.settings = { testMode: false };
         }
@@ -128,6 +136,10 @@ function saveData(data) {
         
         // Add timestamp
         data.lastUpdated = new Date().toISOString();
+        
+        // Log PDF info before saving
+        const pdfCount = data.pdfs ? Object.keys(data.pdfs).length : 0;
+        console.log(`💾 Saving ${pdfCount} PDFs...`);
         
         // Save to primary location
         fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
@@ -159,9 +171,9 @@ function saveData(data) {
     }
 }
 
-// Middleware
-app.use(express.json({ limit: '100mb' }));
-app.use(express.urlencoded({ extended: true, limit: '100mb' }));
+// Middleware - Increase limit for large PDFs
+app.use(express.json({ limit: '500mb' }));
+app.use(express.urlencoded({ extended: true, limit: '500mb' }));
 
 // CORS
 app.use((req, res, next) => {
@@ -185,12 +197,17 @@ app.get('/api/data', (req, res) => {
             const content = fs.readFileSync(DATA_FILE, 'utf8');
             const data = JSON.parse(content);
             
-            // ✅ FIX: Ensure settings exists
+            // Ensure settings exists
             if (!data.settings) {
                 data.settings = { testMode: false };
             }
             if (data.settings.testMode === undefined || data.settings.testMode === null) {
                 data.settings.testMode = false;
+            }
+            
+            // Ensure pdfs exists
+            if (!data.pdfs) {
+                data.pdfs = {};
             }
             
             data._meta = {
@@ -201,9 +218,11 @@ app.get('/api/data', (req, res) => {
                 testMode: data.settings.testMode
             };
             dataCache = data;
+            
+            console.log(`📤 Sent ${data.employees ? data.employees.length : 0} employees, ${data.pdfs ? Object.keys(data.pdfs).length : 0} PDFs`);
             res.json(data);
         } else {
-            // ✅ FIX: Return default data with testMode OFF
+            // Return default data
             const defaultData = {
                 employees: [],
                 pdfs: {},
@@ -214,7 +233,7 @@ app.get('/api/data', (req, res) => {
         }
     } catch (error) {
         console.error('❌ Error reading data:', error);
-        // ✅ FIX: Return safe default with testMode OFF on error
+        // Return safe default
         const safeData = {
             employees: dataCache.employees || [],
             pdfs: dataCache.pdfs || {},
@@ -232,12 +251,25 @@ app.post('/api/data', (req, res) => {
             return res.status(400).json({ error: 'Invalid data format' });
         }
         
-        // ✅ FIX: Ensure required fields with testMode OFF by default
+        // Ensure required fields
         if (!data.employees) data.employees = [];
         if (!data.pdfs) data.pdfs = {};
         if (!data.settings) data.settings = { testMode: false };
         if (data.settings.testMode === undefined || data.settings.testMode === null) {
             data.settings.testMode = false;
+        }
+        
+        // Validate PDF data
+        if (data.pdfs) {
+            let totalSize = 0;
+            for (const [name, pdf] of Object.entries(data.pdfs)) {
+                if (pdf.bytes) {
+                    const sizeInMB = pdf.bytes.length * 0.75 / 1024 / 1024;
+                    totalSize += sizeInMB;
+                    console.log(`   📄 ${name}: ${pdf.pages || 0} pages, ${sizeInMB.toFixed(2)}MB (base64)`);
+                }
+            }
+            console.log(`📦 Total PDF data size: ${totalSize.toFixed(2)}MB`);
         }
         
         // Save data
@@ -262,6 +294,7 @@ app.post('/api/data', (req, res) => {
 app.get('/health', (req, res) => {
     const stats = fs.existsSync(DATA_FILE) ? fs.statSync(DATA_FILE) : null;
     const testMode = dataCache.settings ? dataCache.settings.testMode : false;
+    const pdfCount = dataCache.pdfs ? Object.keys(dataCache.pdfs).length : 0;
     res.json({
         status: 'OK',
         timestamp: new Date().toISOString(),
@@ -269,7 +302,7 @@ app.get('/health', (req, res) => {
         dataExists: fs.existsSync(DATA_FILE),
         dataSize: stats ? stats.size : 0,
         recordCount: dataCache.employees ? dataCache.employees.length : 0,
-        pdfCount: dataCache.pdfs ? Object.keys(dataCache.pdfs).length : 0,
+        pdfCount: pdfCount,
         storageLocation: activeDataDir,
         testMode: testMode
     });
@@ -291,12 +324,11 @@ app.use((err, req, res, next) => {
     res.status(500).json({ error: 'Internal server error' });
 });
 
-// Graceful shutdown - saves data before exit
+// Graceful shutdown
 process.on('SIGTERM', () => {
     console.log('🔄 Received SIGTERM, saving data before shutdown...');
     if (dataCache) {
         try {
-            // ✅ FIX: Ensure settings exists
             if (!dataCache.settings) {
                 dataCache.settings = { testMode: false };
             }
@@ -345,11 +377,12 @@ process.on('uncaughtException', (error) => {
 // Start server
 app.listen(PORT, '0.0.0.0', () => {
     const testMode = dataCache.settings ? dataCache.settings.testMode : false;
+    const pdfCount = dataCache.pdfs ? Object.keys(dataCache.pdfs).length : 0;
     console.log(`✅ Server running on port ${PORT}`);
     console.log(`📁 Data directory: ${activeDataDir}`);
     console.log(`📄 Data file: ${DATA_FILE}`);
     console.log(`👥 Employees: ${dataCache.employees ? dataCache.employees.length : 0}`);
-    console.log(`📄 PDFs: ${dataCache.pdfs ? Object.keys(dataCache.pdfs).length : 0}`);
+    console.log(`📄 PDFs: ${pdfCount}`);
     console.log(`📅 Last updated: ${dataCache.lastUpdated || 'Never'}`);
     console.log(`🔒 Test Mode: ${testMode ? 'ON' : 'OFF'}`);
 });

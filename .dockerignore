@@ -1,0 +1,15 @@
+node_modules
+npm-debug.log
+.DS_Store
+*.log
+.git
+.gitignore
+README.md
+.vscode
+.idea
+local-data
+fallback-data
+backups
+*.backup
+*.tmp
+data/*.tmp

@@ -1,91 +1,114 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const { MongoClient } = require('mongodb');
 const app = express();
 
 // Configuration
 const PORT = process.env.PORT || 3000;
 
-// Multiple storage locations for redundancy
-const STORAGE_LOCATIONS = [
-    process.env.DATA_DIR || '/data',
-    path.join(__dirname, 'data'),
-    path.join(__dirname, 'persistent-data')
-];
+// MongoDB Connection
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://trail_db_user:ZFjmUOMVSdatCOsq@cluster0.h1pqrer.mongodb.net/?retryWrites=true&w=majority';
+const DB_NAME = process.env.DB_NAME || 'payslip_system';
+const COLLECTION_NAME = 'payslip_data';
 
-let activeDataDir = null;
-let activeDataFile = null;
+let db = null;
+let collection = null;
+let dataCache = null;
 
 console.log('🚀 Starting server...');
-console.log('📁 Current directory:', __dirname);
+console.log('📡 MongoDB URI:', MONGODB_URI.replace(/:[^:]*@/, ':****@')); // Hide password in logs
 
-// Function to find the best available storage location
-function findAvailableStorage() {
-    for (const location of STORAGE_LOCATIONS) {
+// Connect to MongoDB
+async function connectToMongoDB() {
+    try {
+        console.log('📡 Connecting to MongoDB Atlas...');
+        const client = new MongoClient(MONGODB_URI, {
+            useNewUrlParser: true,
+            useUnifiedTopology: true,
+            serverSelectionTimeoutMS: 10000,
+            socketTimeoutMS: 45000,
+        });
+        
+        await client.connect();
+        console.log('✅ Connected to MongoDB Atlas successfully!');
+        
+        db = client.db(DB_NAME);
+        collection = db.collection(COLLECTION_NAME);
+        
+        // Create index on empId for faster queries
         try {
-            if (!fs.existsSync(location)) {
-                fs.mkdirSync(location, { recursive: true });
-            }
-            const testFile = path.join(location, '.write-test');
-            fs.writeFileSync(testFile, 'test');
-            fs.unlinkSync(testFile);
-            console.log(`✅ Storage available at: ${location}`);
-            return location;
-        } catch (error) {
-            console.log(`❌ Cannot use ${location}: ${error.message}`);
+            await collection.createIndex({ 'employees.empId': 1 });
+            console.log('✅ Index created on empId');
+        } catch (e) {
+            console.log('⚠️ Index may already exist:', e.message);
         }
+        
+        return true;
+    } catch (error) {
+        console.error('❌ MongoDB connection failed:', error.message);
+        console.log('⚠️ Running with local storage only (data may be lost on restart)');
+        return false;
     }
-    const fallback = path.join(__dirname, 'fallback-data');
-    if (!fs.existsSync(fallback)) {
-        fs.mkdirSync(fallback, { recursive: true });
-    }
-    console.log(`⚠️ Using fallback storage at: ${fallback}`);
-    return fallback;
 }
 
-activeDataDir = findAvailableStorage();
-const DATA_FILE = path.join(activeDataDir, 'data.json');
-console.log('📄 Data file:', DATA_FILE);
-
-// Initialize or recover data file
-function initializeDataFile() {
+// Load data from MongoDB
+async function loadDataFromMongoDB() {
     try {
-        if (fs.existsSync(DATA_FILE)) {
-            const content = fs.readFileSync(DATA_FILE, 'utf8');
-            const data = JSON.parse(content);
-            
-            if (!data.settings) {
-                data.settings = { testMode: false };
-            }
-            if (data.settings.testMode === undefined || data.settings.testMode === null) {
-                data.settings.testMode = false;
-            }
-            if (!data.pdfs) {
-                data.pdfs = {};
-            }
-            
-            const pdfCount = data.pdfs ? Object.keys(data.pdfs).length : 0;
-            console.log(`✅ Data file loaded: ${data.employees ? data.employees.length : 0} employees, ${pdfCount} PDFs`);
-            console.log(`🔒 Test Mode: ${data.settings.testMode ? 'ON' : 'OFF'}`);
-            
+        if (!collection) return null;
+        
+        const data = await collection.findOne({ _id: 'payslip_data' });
+        
+        if (data) {
+            delete data._id;
+            console.log(`✅ Data loaded from MongoDB: ${data.employees ? data.employees.length : 0} employees, ${data.pdfs ? Object.keys(data.pdfs).length : 0} PDFs`);
             return data;
         }
+        
+        return null;
     } catch (error) {
-        console.log('⚠️ Data file corrupted, attempting recovery...');
-        const backupFile = DATA_FILE + '.backup';
-        if (fs.existsSync(backupFile)) {
-            try {
-                const content = fs.readFileSync(backupFile, 'utf8');
-                const data = JSON.parse(content);
-                if (!data.settings) data.settings = { testMode: false };
-                if (!data.pdfs) data.pdfs = {};
-                fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
-                console.log('✅ Data recovered from backup');
-                return data;
-            } catch (e) {
-                console.log('❌ Backup recovery failed');
-            }
+        console.error('❌ Error loading from MongoDB:', error);
+        return null;
+    }
+}
+
+// Save data to MongoDB
+async function saveDataToMongoDB(data) {
+    try {
+        if (!collection) {
+            console.log('⚠️ No MongoDB connection, saving to local cache only');
+            dataCache = data;
+            return false;
         }
+        
+        data.lastUpdated = new Date().toISOString();
+        delete data._id;
+        
+        await collection.updateOne(
+            { _id: 'payslip_data' },
+            { $set: data },
+            { upsert: true }
+        );
+        
+        console.log(`✅ Data saved to MongoDB: ${data.employees ? data.employees.length : 0} employees, ${data.pdfs ? Object.keys(data.pdfs).length : 0} PDFs`);
+        dataCache = data;
+        return true;
+    } catch (error) {
+        console.error('❌ Error saving to MongoDB:', error);
+        return false;
+    }
+}
+
+// Initialize data
+async function initializeData() {
+    let data = await loadDataFromMongoDB();
+    
+    if (data) {
+        if (!data.settings) data.settings = { testMode: false };
+        if (!data.pdfs) data.pdfs = {};
+        if (!data.employees) data.employees = [];
+        dataCache = data;
+        return data;
     }
     
     const initialData = {
@@ -94,49 +117,14 @@ function initializeDataFile() {
         settings: { testMode: false },
         lastUpdated: new Date().toISOString()
     };
-    fs.writeFileSync(DATA_FILE, JSON.stringify(initialData, null, 2));
-    console.log('✅ Created new data file with Test Mode OFF');
+    
+    await saveDataToMongoDB(initialData);
+    dataCache = initialData;
+    console.log('✅ Created new data document in MongoDB');
     return initialData;
 }
 
-let dataCache = initializeDataFile();
-
-// Function to save data with redundancy
-function saveData(data) {
-    try {
-        if (!data.settings) data.settings = { testMode: false };
-        if (!data.pdfs) data.pdfs = {};
-        data.lastUpdated = new Date().toISOString();
-        
-        // Save to primary location
-        fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
-        console.log('✅ Data saved to primary storage');
-        
-        // Save backup
-        const backupFile = DATA_FILE + '.backup';
-        fs.writeFileSync(backupFile, JSON.stringify(data, null, 2));
-        console.log('✅ Backup saved');
-        
-        // Save local backup if using /data
-        if (activeDataDir === '/data') {
-            const localDir = path.join(__dirname, 'data');
-            if (!fs.existsSync(localDir)) {
-                fs.mkdirSync(localDir, { recursive: true });
-            }
-            const localBackup = path.join(localDir, 'data.json');
-            fs.writeFileSync(localBackup, JSON.stringify(data, null, 2));
-            console.log('✅ Additional backup saved locally');
-        }
-        
-        dataCache = data;
-        return true;
-    } catch (error) {
-        console.error('❌ Error saving data:', error);
-        return false;
-    }
-}
-
-// Middleware - Increased limit for large PDFs
+// Middleware
 app.use(express.json({ limit: '500mb' }));
 app.use(express.urlencoded({ extended: true, limit: '500mb' }));
 
@@ -154,42 +142,23 @@ app.use((req, res, next) => {
 // Serve static files
 app.use(express.static('public'));
 
-// ============================================
-// API: GET DATA
-// ============================================
-app.get('/api/data', (req, res) => {
+// API Routes
+app.get('/api/data', async (req, res) => {
     try {
-        if (fs.existsSync(DATA_FILE)) {
-            const content = fs.readFileSync(DATA_FILE, 'utf8');
-            const data = JSON.parse(content);
-            
-            if (!data.settings) data.settings = { testMode: false };
-            if (!data.pdfs) data.pdfs = {};
-            
-            const pdfCount = data.pdfs ? Object.keys(data.pdfs).length : 0;
-            console.log(`📤 Sending: ${data.employees ? data.employees.length : 0} employees, ${pdfCount} PDFs`);
-            
-            data._meta = {
-                lastUpdated: data.lastUpdated || new Date().toISOString(),
-                recordCount: data.employees ? data.employees.length : 0,
-                pdfCount: pdfCount,
-                testMode: data.settings.testMode
-            };
+        const data = await loadDataFromMongoDB();
+        if (data) {
             dataCache = data;
             res.json(data);
         } else {
-            res.json({ employees: [], pdfs: {}, settings: { testMode: false } });
+            res.json(dataCache || { employees: [], pdfs: {}, settings: { testMode: false } });
         }
     } catch (error) {
         console.error('❌ Error reading data:', error);
-        res.json({ employees: dataCache.employees || [], pdfs: dataCache.pdfs || {}, settings: { testMode: false } });
+        res.json(dataCache || { employees: [], pdfs: {}, settings: { testMode: false } });
     }
 });
 
-// ============================================
-// API: POST DATA - SAVE PDFs and Employees
-// ============================================
-app.post('/api/data', (req, res) => {
+app.post('/api/data', async (req, res) => {
     try {
         const data = req.body;
         if (!data || typeof data !== 'object') {
@@ -213,15 +182,16 @@ app.post('/api/data', (req, res) => {
             console.log(`📦 Total PDF data: ${totalSize.toFixed(2)}MB`);
         }
         
-        if (saveData(data)) {
+        const saved = await saveDataToMongoDB(data);
+        if (saved) {
+            dataCache = data;
             res.json({ 
                 success: true, 
                 message: 'Data saved successfully',
-                lastUpdated: data.lastUpdated,
-                pdfCount: Object.keys(data.pdfs || {}).length
+                lastUpdated: data.lastUpdated
             });
         } else {
-            res.status(500).json({ error: 'Failed to save data' });
+            res.status(500).json({ error: 'Failed to save data to MongoDB' });
         }
     } catch (error) {
         console.error('❌ Error saving data:', error);
@@ -229,22 +199,30 @@ app.post('/api/data', (req, res) => {
     }
 });
 
-// ============================================
 // Health check
-// ============================================
-app.get('/health', (req, res) => {
-    const stats = fs.existsSync(DATA_FILE) ? fs.statSync(DATA_FILE) : null;
-    const pdfCount = dataCache.pdfs ? Object.keys(dataCache.pdfs).length : 0;
-    res.json({
-        status: 'OK',
-        timestamp: new Date().toISOString(),
-        dataExists: fs.existsSync(DATA_FILE),
-        dataSize: stats ? stats.size : 0,
-        recordCount: dataCache.employees ? dataCache.employees.length : 0,
-        pdfCount: pdfCount,
-        testMode: dataCache.settings ? dataCache.settings.testMode : false,
-        storageLocation: activeDataDir
-    });
+app.get('/health', async (req, res) => {
+    try {
+        const data = await loadDataFromMongoDB();
+        const mongodbConnected = !!collection;
+        res.json({
+            status: 'OK',
+            timestamp: new Date().toISOString(),
+            recordCount: data ? data.employees.length : 0,
+            pdfCount: data ? Object.keys(data.pdfs).length : 0,
+            testMode: data ? data.settings?.testMode : false,
+            storageType: mongodbConnected ? 'MongoDB Atlas (Free Tier) ✅' : 'Local (ephemeral) ⚠️',
+            mongodbConnected: mongodbConnected,
+            dataExists: !!data
+        });
+    } catch (error) {
+        res.json({
+            status: 'OK',
+            timestamp: new Date().toISOString(),
+            storageType: 'MongoDB Atlas',
+            error: error.message,
+            mongodbConnected: false
+        });
+    }
 });
 
 // Serve index.html
@@ -263,24 +241,35 @@ app.use((err, req, res, next) => {
 });
 
 // Graceful shutdown
-process.on('SIGTERM', () => {
+process.on('SIGTERM', async () => {
     console.log('🔄 Received SIGTERM, saving data...');
-    if (dataCache) saveData(dataCache);
+    if (dataCache) {
+        await saveDataToMongoDB(dataCache);
+    }
     process.exit(0);
 });
 
-process.on('SIGINT', () => {
+process.on('SIGINT', async () => {
     console.log('🔄 Received SIGINT, saving data...');
-    if (dataCache) saveData(dataCache);
+    if (dataCache) {
+        await saveDataToMongoDB(dataCache);
+    }
     process.exit(0);
 });
 
-// Start server
-app.listen(PORT, '0.0.0.0', () => {
-    const pdfCount = dataCache.pdfs ? Object.keys(dataCache.pdfs).length : 0;
-    console.log(`✅ Server running on port ${PORT}`);
-    console.log(`📁 Data directory: ${activeDataDir}`);
-    console.log(`👥 Employees: ${dataCache.employees ? dataCache.employees.length : 0}`);
-    console.log(`📄 PDFs: ${pdfCount}`);
-    console.log(`🔒 Test Mode: ${dataCache.settings?.testMode ? 'ON' : 'OFF'}`);
-});
+// Start Server
+async function startServer() {
+    const connected = await connectToMongoDB();
+    await initializeData();
+    
+    app.listen(PORT, '0.0.0.0', () => {
+        console.log(`✅ Server running on port ${PORT}`);
+        console.log(`📊 Employees: ${dataCache.employees ? dataCache.employees.length : 0}`);
+        console.log(`📄 PDFs: ${dataCache.pdfs ? Object.keys(dataCache.pdfs).length : 0}`);
+        console.log(`🔒 Test Mode: ${dataCache.settings?.testMode ? 'ON' : 'OFF'}`);
+        console.log(`💾 Storage: ${connected ? 'MongoDB Atlas (Free) ✅' : 'Local (ephemeral) ⚠️'}`);
+        console.log(`🌐 URL: http://localhost:${PORT}`);
+    });
+}
+
+startServer();

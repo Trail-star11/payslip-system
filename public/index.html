@@ -394,8 +394,7 @@
     let autoRefreshInterval = null;
     let isRefreshing = false;
     let dataLoaded = false;
-    
-    // ✅ FIX: Track test mode state globally to prevent auto-override
+    let isTestModeChanging = false;
     let testModeState = false;
 
     const $ = id => document.getElementById(id);
@@ -469,6 +468,8 @@
                 if (data.pdfs) {
                     pdfDataStore = {};
                     let loadedCount = 0;
+                    let failedCount = 0;
+                    
                     for (const [filename, pdfData] of Object.entries(data.pdfs)) {
                         if (pdfData.bytes) {
                             try {
@@ -482,26 +483,24 @@
                                     pages: pdfData.pages || 0
                                 };
                                 loadedCount++;
+                                console.log(`✅ Loaded PDF: ${filename} (${pdfData.pages || 0} pages)`);
                             } catch(e) {
-                                console.error(`❌ Failed to load PDF ${filename}:`, e);
+                                failedCount++;
+                                console.error(`❌ Failed to load PDF ${filename}:`, e.message);
                             }
                         }
                     }
-                    console.log(`📄 Loaded ${loadedCount} PDFs from server`);
+                    console.log(`📄 Loaded ${loadedCount} PDFs, ${failedCount} failed`);
                 }
                 
-                // ✅ FIX: Load test mode from server, but only update if not manually changed
+                // Load settings (test mode) - Default to OFF
                 if (data.settings && data.settings.testMode !== undefined) {
-                    // Only update if not in the middle of a manual change
                     if (!isTestModeChanging) {
                         testModeToggle.checked = data.settings.testMode;
                         testModeState = data.settings.testMode;
                         updateTestModeStatus();
-                    } else {
-                        console.log('⏳ Test mode change in progress, skipping server update');
                     }
                 } else {
-                    // Default to OFF
                     testModeToggle.checked = false;
                     testModeState = false;
                     updateTestModeStatus();
@@ -513,9 +512,21 @@
                 // Show last updated time
                 const lastUpdated = data.lastUpdated || data._meta?.lastUpdated || 'unknown';
                 const testModeStatusText = testModeToggle.checked ? 'ON' : 'OFF';
+                const pdfCount = Object.keys(pdfDataStore).length;
+                
                 if (adminUnlocked) {
-                    setAdminMsg(`✅ Loaded ${employeeData.length} employee records and ${Object.keys(pdfDataStore).length} PDFs from server. Last updated: ${lastUpdated !== 'unknown' ? new Date(lastUpdated).toLocaleString() : 'Never'}. Test Mode: ${testModeStatusText}`, 'success');
+                    setAdminMsg(`✅ Loaded ${employeeData.length} employee records and ${pdfCount} PDFs from server. Last updated: ${lastUpdated !== 'unknown' ? new Date(lastUpdated).toLocaleString() : 'Never'}. Test Mode: ${testModeStatusText}`, 'success');
                 }
+                
+                // Log PDF status for each employee
+                let pdfFound = 0;
+                employeeData.forEach(emp => {
+                    if (emp.pageNumber && emp.pdfFile && pdfDataStore[emp.pdfFile]) {
+                        pdfFound++;
+                    }
+                });
+                console.log(`📊 ${pdfFound}/${employeeData.length} employees have PDFs loaded`);
+                
                 return true;
             }
             return false;
@@ -529,9 +540,6 @@
             isRefreshing = false;
         }
     }
-
-    // ✅ FIX: Track if test mode is being manually changed
-    let isTestModeChanging = false;
 
     // ---------- SAVE DATA TO SERVER ----------
     async function saveDataToServer(employees, pdfs = null, settings = null) {
@@ -578,7 +586,7 @@
                 }
             }
             
-            // ✅ FIX: Save settings with current test mode state
+            // Save settings
             if (settings) {
                 data.settings = settings;
             } else {
@@ -599,6 +607,7 @@
             });
             console.log('✅ Data saved successfully');
             console.log(`🔒 Test Mode saved as: ${data.settings.testMode ? 'ON' : 'OFF'}`);
+            console.log(`📄 PDFs saved: ${Object.keys(data.pdfs || {}).length}`);
             return true;
         } catch (error) {
             console.error('❌ Error saving data:', error);
@@ -612,13 +621,10 @@
         if (autoRefreshInterval) clearInterval(autoRefreshInterval);
         autoRefreshInterval = setInterval(async () => {
             if (document.hidden) return;
-            // ✅ FIX: Only refresh if not in manual change mode
             if (!isTestModeChanging) {
                 await loadDataFromServer();
-            } else {
-                console.log('⏳ Test mode change in progress, skipping auto-refresh');
             }
-        }, 5000); // Refresh every 5 seconds
+        }, 10000);
     }
 
     // ---------- ADMIN LOCK ----------
@@ -719,7 +725,6 @@
         if (type) userStatus.classList.add(type);
     }
 
-    // ✅ FIX: Update test mode status and show/hide dummy password
     function updateTestModeStatus() {
         const isTestModeOn = testModeToggle.checked;
         testModeState = isTestModeOn;
@@ -730,7 +735,6 @@
             if (adminUnlocked) {
                 setAdminMsg('🔬 Test Mode ENABLED. Employees can use their Employee ID as password.', 'warning');
             }
-            // Show dummy password if a user is loaded or ID is entered
             const empId = userEmpId.value.trim();
             if (empId) {
                 const emp = findEmployee(empId);
@@ -757,7 +761,6 @@
         return (bytes / 1048576).toFixed(1) + ' MB';
     }
 
-    // DUMMY PASSWORD = EMPLOYEE ID
     function getDummyPassword(emp) {
         if (emp && emp.empId) {
             return emp.empId;
@@ -845,10 +848,13 @@
         let html = `<table class="employee-table"><thead><tr><th>Emp ID</th><th>Name</th><th>PDF Found</th><th>Password</th></tr></thead><tbody>`;
         employeeData.forEach(emp => {
             const hasPdf = emp.pageNumber && emp.pdfFile && pdfDataStore[emp.pdfFile];
-            const pdfStatus = hasPdf ? `<span class="badge badge-page">Page ${emp.pageNumber} (${emp.pdfFile})</span>` : 
-                              emp.pageNumber ? `<span class="badge badge-not-found">PDF not loaded</span>` :
-                              `<span class="badge badge-not-found">Not found</span>`;
-            const passStatus = emp.password && emp.password.length > 0 ? `<span class="badge badge-pass-yes">✅ Available</span>` : `<span class="badge badge-pass-no">❌ Not set</span>`;
+            const pdfStatus = hasPdf ? 
+                `<span class="badge badge-page">✅ Page ${emp.pageNumber} (${emp.pdfFile})</span>` : 
+                emp.pageNumber ? `<span class="badge badge-not-found">⚠️ PDF not loaded</span>` :
+                `<span class="badge badge-not-found">❌ Not found</span>`;
+            const passStatus = emp.password && emp.password.length > 0 ? 
+                `<span class="badge badge-pass-yes">✅ Available</span>` : 
+                `<span class="badge badge-pass-no">❌ Not set</span>`;
             html += `<tr><td><strong>${emp.empId}</strong></td><td>${emp.name || 'N/A'}</td><td>${pdfStatus}</td><td>${passStatus}</td></tr>`;
         });
         html += '</tbody></table>';
@@ -959,7 +965,11 @@
                     const arrayBuffer = await pdfFile.arrayBuffer();
                     const pdfBytes = new Uint8Array(arrayBuffer);
                     
-                    pdfDataStore[pdfFile.name] = { bytes: pdfBytes.buffer, pages: 0 };
+                    // Store PDF data
+                    pdfDataStore[pdfFile.name] = { 
+                        bytes: pdfBytes.buffer, 
+                        pages: 0 
+                    };
 
                     const pdf = await pdfjsLib.getDocument({ data: pdfBytes }).promise;
                     const pageCount = pdf.numPages;
@@ -1024,7 +1034,7 @@
 
             employeeData = mergedData;
             
-            // ✅ FIX: Preserve test mode when saving
+            // Save with all PDF data
             const currentTestMode = testModeToggle.checked;
             const saved = await saveDataToServer(employeeData, pdfDataStore, { testMode: currentTestMode });
             if (!saved) {
@@ -1042,7 +1052,9 @@
             progressFill.style.width = '100%';
             progressPercent.textContent = '100%';
             progressText.textContent = '✅ Complete!';
-            setAdminMsg(`✅ Successfully processed ${employeeData.length} employees with ${Object.keys(pdfDataStore).length} PDF(s). Test Mode: ${currentTestMode ? 'ON' : 'OFF'}`, 'success');
+            
+            const pdfCount = Object.keys(pdfDataStore).length;
+            setAdminMsg(`✅ Successfully processed ${employeeData.length} employees with ${pdfCount} PDF(s). Test Mode: ${currentTestMode ? 'ON' : 'OFF'}`, 'success');
 
             setTimeout(() => { progressContainer.style.display = 'none'; }, 2000);
             renderEmployeeList();
@@ -1093,7 +1105,6 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
             updatePdfFileList();
             csvUploadBox.classList.remove('has-file');
             
-            // ✅ FIX: Preserve test mode when clearing
             const currentTestMode = testModeToggle.checked;
             await saveDataToServer(employeeData, {}, { testMode: currentTestMode });
             renderEmployeeList();
@@ -1138,10 +1149,8 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
             return; 
         }
         
-        // ✅ FIX: Set flag to prevent auto-refresh from overriding
         isTestModeChanging = true;
         
-        // Update UI immediately
         updateTestModeStatus();
         payslipArea.classList.remove('show');
         
@@ -1155,10 +1164,8 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
             updateDummyPasswordHint(currentUser);
         }
         
-        // ✅ FIX: Save to server immediately
         saveDataToServer(employeeData, null, { testMode: testModeToggle.checked });
         
-        // ✅ FIX: Release the lock after save completes
         setTimeout(() => {
             isTestModeChanging = false;
             console.log('🔓 Test mode change complete, auto-refresh re-enabled');
@@ -1326,10 +1333,8 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
         if (adminTabBtn) adminTabBtn.classList.remove('visible');
         adminToggleLink.style.display = 'flex';
 
-        // Load data from server
         await loadDataFromServer(true);
         
-        // ✅ FIX: Ensure test mode is OFF by default
         if (!testModeToggle.checked) {
             testModeToggle.checked = false;
             testModeState = false;
@@ -1339,7 +1344,6 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
         setAdminMsg(`📦 ${employeeData.length} employee records, ${Object.keys(pdfDataStore).length} PDFs loaded. Test Mode: ${testModeToggle.checked ? 'ON' : 'OFF'}`, '');
         setUserMsg('Enter Employee ID and password to download payslip.');
         
-        // Start auto-refresh
         startAutoRefresh();
         
         console.log('📄 Multi-device payslip system running.');
@@ -1349,7 +1353,7 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
         console.log('💾 Data persists across refreshes!');
         console.log('🔑 Dummy password = Employee ID (when Test Mode is ON)');
         console.log('✅ Test Mode will NOT auto-enable without admin permission.');
-        console.log('✅ Test Mode changes are saved immediately and survive refreshes.');
+        console.log('✅ PDF data is properly stored and loaded.');
     }
 
     userTabBtn.classList.add('active');

@@ -307,7 +307,7 @@
             <div class="flex-between">
                 <div>
                     <h4 style="font-size: 1rem; margin-bottom: 0.2rem;"><i class="fas fa-flask" style="color: #f59e0b;"></i> Test Mode Settings</h4>
-                    <span class="small-note">When enabled, the employee panel will show a dummy password hint for testing.</span>
+                    <span class="small-note">When enabled, employees with NO password can use a dummy password for testing.</span>
                 </div>
                 <div style="display: flex; align-items: center; gap: 1rem;">
                     <span id="testModeStatus" class="badge badge-test-off">🔒 OFF</span>
@@ -318,7 +318,7 @@
                 </div>
             </div>
             <div style="margin-top: 0.5rem;">
-                <span class="small-note"><i class="fas fa-info-circle"></i> In test mode, if no password is set, a dummy password is generated for download.</span>
+                <span class="small-note"><i class="fas fa-info-circle"></i> When enabled, employees without a password can login with a system-generated dummy password.</span>
             </div>
         </div>
 
@@ -349,9 +349,9 @@
         </div>
 
         <div id="dummyPasswordDisplay" class="dummy-password-display">
-            <span class="label"><i class="fas fa-lock-open"></i> Test Mode Password Hint:</span>
+            <span class="label"><i class="fas fa-lock-open"></i> Test Mode: Dummy Password</span>
             <span class="password-code" id="dummyPasswordHint">••••••</span>
-            <span class="small-note" style="margin:0;">Use this password to login (test mode only)</span>
+            <span class="small-note" style="margin:0;">Use this password if you don't have one set (Test Mode only)</span>
         </div>
 
         <div class="flex-row">
@@ -670,17 +670,17 @@
             testModeStatus.textContent = '🔬 ON';
             testModeStatus.className = 'badge badge-test-on';
             if (adminUnlocked) {
-                setAdminMsg('🔬 Test Mode is ENABLED. Password hints will be shown.', 'warning');
+                setAdminMsg('🔬 Test Mode ENABLED. Employees without passwords can use dummy passwords.', 'warning');
             }
         } else {
             testModeStatus.textContent = '🔒 OFF';
             testModeStatus.className = 'badge badge-test-off';
             dummyPasswordDisplay.classList.remove('show');
             if (adminUnlocked) {
-                setAdminMsg('🔒 Test Mode is DISABLED. Employees must know their password.', '');
+                setAdminMsg('🔒 Test Mode DISABLED. Employees must use their actual passwords.', '');
             }
         }
-        // Save settings to server (only if admin is unlocked)
+        // Save settings to server
         if (adminUnlocked) {
             saveDataToServer(employeeData, null, { testMode: testModeToggle.checked });
         }
@@ -693,11 +693,25 @@
         return (bytes / 1048576).toFixed(1) + ' MB';
     }
 
+    function getDummyPassword(emp) {
+        // Generate a consistent dummy password based on empId
+        if (emp && emp.empId) {
+            return emp.empId.toLowerCase() + '123';
+        }
+        return 'dummy123';
+    }
+
     function updateDummyPasswordHint(user) {
         if (user && testModeToggle.checked) {
-            const pass = user.password || 'dummy123';
-            dummyPasswordHint.textContent = pass;
-            dummyPasswordDisplay.classList.add('show');
+            // Only show dummy password if the employee has NO password set
+            if (!user.password || user.password.length === 0) {
+                const dummyPass = getDummyPassword(user);
+                dummyPasswordHint.textContent = dummyPass;
+                dummyPasswordDisplay.classList.add('show');
+            } else {
+                // Employee has a password, no dummy needed
+                dummyPasswordDisplay.classList.remove('show');
+            }
         } else {
             dummyPasswordDisplay.classList.remove('show');
         }
@@ -1047,8 +1061,11 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
         if (!adminUnlocked) { lockAdmin(); return; }
         updateTestModeStatus();
         payslipArea.classList.remove('show');
-        if (testModeToggle.checked) {
+        // Only show dummy if test mode is on AND current user has no password
+        if (testModeToggle.checked && currentUser && (!currentUser.password || currentUser.password.length === 0)) {
             dummyPasswordDisplay.classList.add('show');
+            const dummyPass = getDummyPassword(currentUser);
+            dummyPasswordHint.textContent = dummyPass;
         } else {
             dummyPasswordDisplay.classList.remove('show');
         }
@@ -1070,9 +1087,22 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
         if (!emp) { setUserMsg(`❌ No employee found with ID: ${empId}`, 'error'); return; }
 
         let passOk = false;
-        if (testModeToggle.checked && (!emp.password || emp.password.length === 0)) {
-            passOk = true;
+        
+        // Check if test mode is enabled
+        if (testModeToggle.checked) {
+            // If employee has NO password, accept the dummy password
+            if (!emp.password || emp.password.length === 0) {
+                const dummyPass = getDummyPassword(emp);
+                passOk = (password === dummyPass);
+                if (passOk) {
+                    setUserMsg(`🔬 Test Mode: Using dummy password for ${emp.name || emp.empId}`, 'warning');
+                }
+            } else {
+                // Employee has a password, use it
+                passOk = (password === emp.password);
+            }
         } else {
+            // Test mode OFF - must use actual password
             passOk = (password === emp.password);
         }
 
@@ -1145,9 +1175,11 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
         const hasPdf = emp.pageNumber ? `✅ Page ${emp.pageNumber}${emp.pdfFile ? ' (' + emp.pdfFile + ')' : ''}` : '❌ No PDF';
         const hasPass = emp.password ? '✅ Set' : '❌ Not set';
         setUserMsg(`✅ Found: ${emp.name} | Password: ${hasPass} | PDF: ${hasPdf}`, 'success');
-        if (testModeToggle.checked) {
-            const hint = emp.password || 'dummy123';
-            dummyPasswordHint.textContent = hint;
+        
+        // Show dummy password hint if test mode is ON and employee has no password
+        if (testModeToggle.checked && (!emp.password || emp.password.length === 0)) {
+            const dummyPass = getDummyPassword(emp);
+            dummyPasswordHint.textContent = dummyPass;
             dummyPasswordDisplay.classList.add('show');
         } else {
             dummyPasswordDisplay.classList.remove('show');
@@ -1192,8 +1224,8 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
         
         console.log('📄 Multi-device payslip system running.');
         console.log('🔒 Test Mode: OFF by default.');
-        console.log('🔄 Auto-refresh enabled. Data syncs every 5 seconds.');
         console.log('💾 Data persists across refreshes!');
+        console.log('🔑 Dummy passwords only work when Test Mode is ON and employee has no password.');
     }
 
     // Make sure default tab is user

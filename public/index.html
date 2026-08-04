@@ -341,7 +341,7 @@
 
         <div class="form-group">
             <label><i class="fas fa-id-badge"></i> Employee ID</label>
-            <input type="text" id="userEmpId" placeholder="e.g. PPRR0*********" />
+            <input type="text" id="userEmpId" placeholder="e.g. PPRR00476907" />
         </div>
         <div class="form-group">
             <label><i class="fas fa-lock"></i> Password</label>
@@ -394,7 +394,9 @@
     let autoRefreshInterval = null;
     let isRefreshing = false;
     let dataLoaded = false;
-    let isTestModeSaved = false;
+    
+    // ✅ FIX: Track test mode state globally to prevent auto-override
+    let testModeState = false;
 
     const $ = id => document.getElementById(id);
     const adminStatus = $('adminStatus');
@@ -488,23 +490,31 @@
                     console.log(`📄 Loaded ${loadedCount} PDFs from server`);
                 }
                 
-                // ✅ FIX: Load settings (test mode) - Default to OFF
+                // ✅ FIX: Load test mode from server, but only update if not manually changed
                 if (data.settings && data.settings.testMode !== undefined) {
-                    testModeToggle.checked = data.settings.testMode;
+                    // Only update if not in the middle of a manual change
+                    if (!isTestModeChanging) {
+                        testModeToggle.checked = data.settings.testMode;
+                        testModeState = data.settings.testMode;
+                        updateTestModeStatus();
+                    } else {
+                        console.log('⏳ Test mode change in progress, skipping server update');
+                    }
                 } else {
-                    // ✅ FIX: Default to OFF if not set
+                    // Default to OFF
                     testModeToggle.checked = false;
+                    testModeState = false;
+                    updateTestModeStatus();
                 }
-                updateTestModeStatus();
                 
                 renderEmployeeList();
                 dataLoaded = true;
                 
                 // Show last updated time
                 const lastUpdated = data.lastUpdated || data._meta?.lastUpdated || 'unknown';
-                const testModeStatus = data.settings?.testMode ? 'ON' : 'OFF';
+                const testModeStatusText = testModeToggle.checked ? 'ON' : 'OFF';
                 if (adminUnlocked) {
-                    setAdminMsg(`✅ Loaded ${employeeData.length} employee records and ${Object.keys(pdfDataStore).length} PDFs from server. Last updated: ${lastUpdated !== 'unknown' ? new Date(lastUpdated).toLocaleString() : 'Never'}. Test Mode: ${testModeStatus}`, 'success');
+                    setAdminMsg(`✅ Loaded ${employeeData.length} employee records and ${Object.keys(pdfDataStore).length} PDFs from server. Last updated: ${lastUpdated !== 'unknown' ? new Date(lastUpdated).toLocaleString() : 'Never'}. Test Mode: ${testModeStatusText}`, 'success');
                 }
                 return true;
             }
@@ -519,6 +529,9 @@
             isRefreshing = false;
         }
     }
+
+    // ✅ FIX: Track if test mode is being manually changed
+    let isTestModeChanging = false;
 
     // ---------- SAVE DATA TO SERVER ----------
     async function saveDataToServer(employees, pdfs = null, settings = null) {
@@ -565,14 +578,14 @@
                 }
             }
             
-            // Save settings
+            // ✅ FIX: Save settings with current test mode state
             if (settings) {
                 data.settings = settings;
             } else {
                 data.settings = { testMode: testModeToggle.checked };
             }
             
-            // ✅ FIX: Ensure testMode is explicitly set
+            // Ensure testMode is explicitly set
             if (data.settings.testMode === undefined || data.settings.testMode === null) {
                 data.settings.testMode = false;
             }
@@ -599,10 +612,13 @@
         if (autoRefreshInterval) clearInterval(autoRefreshInterval);
         autoRefreshInterval = setInterval(async () => {
             if (document.hidden) return;
-            if (!isTestModeSaved) {
+            // ✅ FIX: Only refresh if not in manual change mode
+            if (!isTestModeChanging) {
                 await loadDataFromServer();
+            } else {
+                console.log('⏳ Test mode change in progress, skipping auto-refresh');
             }
-        }, 10000);
+        }, 5000); // Refresh every 5 seconds
     }
 
     // ---------- ADMIN LOCK ----------
@@ -703,9 +719,10 @@
         if (type) userStatus.classList.add(type);
     }
 
-    // ✅ FIX: Update test mode status - ensures UI reflects server state
+    // ✅ FIX: Update test mode status and show/hide dummy password
     function updateTestModeStatus() {
         const isTestModeOn = testModeToggle.checked;
+        testModeState = isTestModeOn;
         
         if (isTestModeOn) {
             testModeStatus.textContent = '🔬 ON';
@@ -1007,7 +1024,7 @@
 
             employeeData = mergedData;
             
-            // ✅ FIX: Ensure testMode is preserved when saving
+            // ✅ FIX: Preserve test mode when saving
             const currentTestMode = testModeToggle.checked;
             const saved = await saveDataToServer(employeeData, pdfDataStore, { testMode: currentTestMode });
             if (!saved) {
@@ -1040,7 +1057,7 @@
     // ---------- REFRESH DATA ----------
     $('refreshDataBtn').addEventListener('click', async function() {
         if (!adminUnlocked) { lockAdmin(); return; }
-        isTestModeSaved = false;
+        isTestModeChanging = false;
         await loadDataFromServer(true);
         setAdminMsg('🔄 Data refreshed from server.', 'success');
     });
@@ -1121,8 +1138,10 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
             return; 
         }
         
-        isTestModeSaved = true;
+        // ✅ FIX: Set flag to prevent auto-refresh from overriding
+        isTestModeChanging = true;
         
+        // Update UI immediately
         updateTestModeStatus();
         payslipArea.classList.remove('show');
         
@@ -1136,12 +1155,14 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
             updateDummyPasswordHint(currentUser);
         }
         
-        // ✅ FIX: Save test mode state to server
+        // ✅ FIX: Save to server immediately
         saveDataToServer(employeeData, null, { testMode: testModeToggle.checked });
         
+        // ✅ FIX: Release the lock after save completes
         setTimeout(() => {
-            isTestModeSaved = false;
-        }, 2000);
+            isTestModeChanging = false;
+            console.log('🔓 Test mode change complete, auto-refresh re-enabled');
+        }, 3000);
     });
 
     // ---------- USER: LOGIN WITH PASSWORD ----------
@@ -1305,17 +1326,20 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
         if (adminTabBtn) adminTabBtn.classList.remove('visible');
         adminToggleLink.style.display = 'flex';
 
+        // Load data from server
         await loadDataFromServer(true);
         
         // ✅ FIX: Ensure test mode is OFF by default
         if (!testModeToggle.checked) {
             testModeToggle.checked = false;
+            testModeState = false;
             updateTestModeStatus();
         }
         
         setAdminMsg(`📦 ${employeeData.length} employee records, ${Object.keys(pdfDataStore).length} PDFs loaded. Test Mode: ${testModeToggle.checked ? 'ON' : 'OFF'}`, '');
         setUserMsg('Enter Employee ID and password to download payslip.');
         
+        // Start auto-refresh
         startAutoRefresh();
         
         console.log('📄 Multi-device payslip system running.');
@@ -1325,6 +1349,7 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
         console.log('💾 Data persists across refreshes!');
         console.log('🔑 Dummy password = Employee ID (when Test Mode is ON)');
         console.log('✅ Test Mode will NOT auto-enable without admin permission.');
+        console.log('✅ Test Mode changes are saved immediately and survive refreshes.');
     }
 
     userTabBtn.classList.add('active');

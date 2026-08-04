@@ -1,10 +1,11 @@
 services:
   - type: web
     name: payslip-system
-    env: node
+    runtime: node
     buildCommand: npm install
     startCommand: node server.js
     healthCheckPath: /health
+    plan: free
     envVars:
       - key: NODE_ENV
         value: production
@@ -14,3 +15,7 @@ services:
       name: data
       mountPath: /data
       sizeGB: 1
+    buildFilter:
+      ignoredPaths:
+        - README.md
+        - .gitignore

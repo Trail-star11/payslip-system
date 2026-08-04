@@ -394,9 +394,6 @@
     let autoRefreshInterval = null;
     let isRefreshing = false;
     let dataLoaded = false;
-    
-    // ✅ FIX: Test mode state - ONLY controlled by admin toggle
-    let testModeState = false;
     let isTestModeChanging = false;
     let manualTestModeOverride = false;
 
@@ -496,16 +493,14 @@
                     console.log(`📄 Loaded ${loadedCount} PDFs, ${failedCount} failed`);
                 }
                 
-                // ✅ FIX: Load test mode from server, but ONLY if not manually overridden
+                // Load test mode from server - but respect manual override
                 if (!manualTestModeOverride && !isTestModeChanging) {
                     if (data.settings && data.settings.testMode !== undefined) {
                         testModeToggle.checked = data.settings.testMode;
-                        testModeState = data.settings.testMode;
                         updateTestModeStatus();
-                        console.log(`🔒 Test Mode loaded from server: ${testModeState ? 'ON' : 'OFF'}`);
+                        console.log(`🔒 Test Mode loaded from server: ${testModeToggle.checked ? 'ON' : 'OFF'}`);
                     } else {
                         testModeToggle.checked = false;
-                        testModeState = false;
                         updateTestModeStatus();
                     }
                 } else {
@@ -523,15 +518,6 @@
                 if (adminUnlocked) {
                     setAdminMsg(`✅ Loaded ${employeeData.length} employee records and ${pdfCount} PDFs from server. Last updated: ${lastUpdated !== 'unknown' ? new Date(lastUpdated).toLocaleString() : 'Never'}. Test Mode: ${testModeStatusText}`, 'success');
                 }
-                
-                // Log PDF status for each employee
-                let pdfFound = 0;
-                employeeData.forEach(emp => {
-                    if (emp.pageNumber && emp.pdfFile && pdfDataStore[emp.pdfFile]) {
-                        pdfFound++;
-                    }
-                });
-                console.log(`📊 ${pdfFound}/${employeeData.length} employees have PDFs loaded`);
                 
                 return true;
             }
@@ -592,7 +578,7 @@
                 }
             }
             
-            // Save settings - use current toggle state
+            // Save settings
             if (settings) {
                 data.settings = settings;
             } else {
@@ -604,7 +590,6 @@
                 data.settings.testMode = false;
             }
             
-            // Add timestamp
             data.lastUpdated = new Date().toISOString();
             
             const result = await apiCall('/data', {
@@ -613,7 +598,6 @@
             });
             console.log('✅ Data saved successfully');
             console.log(`🔒 Test Mode saved as: ${data.settings.testMode ? 'ON' : 'OFF'}`);
-            console.log(`📄 PDFs saved: ${Object.keys(data.pdfs || {}).length}`);
             return true;
         } catch (error) {
             console.error('❌ Error saving data:', error);
@@ -627,11 +611,8 @@
         if (autoRefreshInterval) clearInterval(autoRefreshInterval);
         autoRefreshInterval = setInterval(async () => {
             if (document.hidden) return;
-            // ✅ FIX: Skip auto-refresh if test mode is being manually changed
             if (!isTestModeChanging) {
                 await loadDataFromServer();
-            } else {
-                console.log('⏳ Test mode change in progress, skipping auto-refresh');
             }
         }, 10000);
     }
@@ -737,7 +718,6 @@
     // ✅ FIX: Update test mode status and show/hide dummy password instantly
     function updateTestModeStatus() {
         const isTestModeOn = testModeToggle.checked;
-        testModeState = isTestModeOn;
         
         if (isTestModeOn) {
             testModeStatus.textContent = '🔬 ON';
@@ -745,31 +725,40 @@
             if (adminUnlocked) {
                 setAdminMsg('🔬 Test Mode ENABLED. Employees can use their Employee ID as password.', 'warning');
             }
-            // ✅ FIX: Show dummy password instantly for ANY employee who has entered ID
-            const empId = userEmpId.value.trim();
-            if (empId) {
-                const emp = findEmployee(empId);
-                if (emp) {
-                    updateDummyPasswordHint(emp);
-                } else {
-                    // Show dummy password even if employee not found (for testing)
-                    dummyPasswordHint.textContent = empId;
-                    dummyPasswordDisplay.classList.add('show');
-                }
-            } else if (currentUser) {
-                updateDummyPasswordHint(currentUser);
-            } else {
-                // If no employee ID entered, show a generic hint
-                dummyPasswordHint.textContent = 'Enter Employee ID to see your password';
-                dummyPasswordDisplay.classList.add('show');
-            }
+            // ✅ FIX: ALWAYS show dummy password when test mode is ON
+            showDummyPassword();
         } else {
             testModeStatus.textContent = '🔒 OFF';
             testModeStatus.className = 'badge badge-test-off';
+            // ✅ FIX: IMMEDIATELY hide dummy password when test mode is OFF
             dummyPasswordDisplay.classList.remove('show');
             if (adminUnlocked) {
                 setAdminMsg('🔒 Test Mode DISABLED. Employees must use their actual passwords.', '');
             }
+        }
+    }
+
+    // ✅ FIX: Show dummy password with current Employee ID
+    function showDummyPassword() {
+        const empId = userEmpId.value.trim();
+        
+        if (empId) {
+            // Check if employee exists in system
+            const emp = findEmployee(empId);
+            if (emp && emp.empId) {
+                dummyPasswordHint.textContent = emp.empId;
+            } else {
+                // Show the entered ID as dummy password
+                dummyPasswordHint.textContent = empId;
+            }
+            dummyPasswordDisplay.classList.add('show');
+        } else if (currentUser && currentUser.empId) {
+            dummyPasswordHint.textContent = currentUser.empId;
+            dummyPasswordDisplay.classList.add('show');
+        } else {
+            // Show placeholder message
+            dummyPasswordHint.textContent = 'Enter Employee ID to see your password';
+            dummyPasswordDisplay.classList.add('show');
         }
     }
 
@@ -785,31 +774,6 @@
             return emp.empId;
         }
         return 'dummy123';
-    }
-
-    function updateDummyPasswordHint(user) {
-        // ✅ FIX: Only show if test mode is ON
-        if (!testModeToggle.checked) {
-            dummyPasswordDisplay.classList.remove('show');
-            return;
-        }
-        
-        // Show dummy password for any user when test mode is ON
-        if (user && user.empId) {
-            const dummyPass = getDummyPassword(user);
-            dummyPasswordHint.textContent = dummyPass;
-            dummyPasswordDisplay.classList.add('show');
-        } else {
-            // If no user, show a hint
-            const empId = userEmpId.value.trim();
-            if (empId) {
-                dummyPasswordHint.textContent = empId;
-                dummyPasswordDisplay.classList.add('show');
-            } else {
-                dummyPasswordHint.textContent = 'Enter Employee ID to see your password';
-                dummyPasswordDisplay.classList.add('show');
-            }
-        }
     }
 
     // ---------- EXTRACT FUNCTIONS ----------
@@ -1062,7 +1026,6 @@
 
             employeeData = mergedData;
             
-            // Save with all PDF data
             const currentTestMode = testModeToggle.checked;
             const saved = await saveDataToServer(employeeData, pdfDataStore, { testMode: currentTestMode });
             if (!saved) {
@@ -1097,7 +1060,6 @@
     // ---------- REFRESH DATA ----------
     $('refreshDataBtn').addEventListener('click', async function() {
         if (!adminUnlocked) { lockAdmin(); return; }
-        // ✅ FIX: Reset override flag to allow loading from server
         manualTestModeOverride = false;
         isTestModeChanging = false;
         await loadDataFromServer(true);
@@ -1179,7 +1141,7 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
             return; 
         }
         
-        // ✅ FIX: Set flags to prevent auto-refresh from overriding
+        // Set flags to prevent auto-refresh from overriding
         isTestModeChanging = true;
         manualTestModeOverride = true;
         
@@ -1188,28 +1150,16 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
         payslipArea.classList.remove('show');
         
         // ✅ FIX: Show/hide dummy password instantly based on toggle
-        const empId = userEmpId.value.trim();
-        if (empId) {
-            const emp = findEmployee(empId);
-            if (emp) {
-                updateDummyPasswordHint(emp);
-            } else {
-                // Show dummy password even if employee not found
-                dummyPasswordHint.textContent = empId;
-                dummyPasswordDisplay.classList.add('show');
-            }
-        } else if (currentUser) {
-            updateDummyPasswordHint(currentUser);
+        if (testModeToggle.checked) {
+            showDummyPassword();
         } else {
-            // If no employee ID, show generic message
-            dummyPasswordHint.textContent = 'Enter Employee ID to see your password';
-            dummyPasswordDisplay.classList.add('show');
+            dummyPasswordDisplay.classList.remove('show');
         }
         
-        // ✅ FIX: Save to server immediately
+        // Save to server immediately
         saveDataToServer(employeeData, null, { testMode: testModeToggle.checked });
         
-        // ✅ FIX: Release lock after save completes
+        // Release lock after save completes
         setTimeout(() => {
             isTestModeChanging = false;
             console.log('🔓 Test mode change complete, auto-refresh re-enabled');
@@ -1255,7 +1205,11 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
             setUserMsg(`✅ Login successful! Welcome ${emp.name || emp.empId}.`, 'success');
         }
         await showPayslip(emp);
-        updateDummyPasswordHint(emp);
+        
+        // ✅ FIX: Show dummy password if test mode is ON
+        if (testModeToggle.checked) {
+            showDummyPassword();
+        }
     });
 
     // ---------- SHOW PAYSLIP ----------
@@ -1333,11 +1287,9 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
         const hasPass = emp.password ? '✅ Set' : '❌ Not set';
         setUserMsg(`✅ Found: ${emp.name || emp.empId} | Password: ${hasPass} | PDF: ${pdfStatus}`, 'success');
         
-        // ✅ FIX: Always show dummy password if test mode is ON
+        // ✅ FIX: Show dummy password if test mode is ON
         if (testModeToggle.checked) {
-            const dummyPass = getDummyPassword(emp);
-            dummyPasswordHint.textContent = dummyPass;
-            dummyPasswordDisplay.classList.add('show');
+            showDummyPassword();
         } else {
             dummyPasswordDisplay.classList.remove('show');
         }
@@ -1345,20 +1297,9 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
 
     // ---------- EMPLOYEE ID INPUT CHANGE ----------
     userEmpId.addEventListener('input', function() {
-        const empId = this.value.trim();
         // ✅ FIX: Update dummy password instantly when user types
-        if (empId && testModeToggle.checked) {
-            const emp = findEmployee(empId);
-            if (emp) {
-                updateDummyPasswordHint(emp);
-            } else {
-                // Show entered ID as dummy password even if not in system
-                dummyPasswordHint.textContent = empId;
-                dummyPasswordDisplay.classList.add('show');
-            }
-        } else if (!empId && testModeToggle.checked) {
-            dummyPasswordHint.textContent = 'Enter Employee ID to see your password';
-            dummyPasswordDisplay.classList.add('show');
+        if (testModeToggle.checked) {
+            showDummyPassword();
         } else {
             dummyPasswordDisplay.classList.remove('show');
         }
@@ -1389,10 +1330,9 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
         // Load data from server
         await loadDataFromServer(true);
         
-        // ✅ FIX: Ensure test mode is OFF by default, but respect saved state
+        // Ensure test mode is OFF by default
         if (!testModeToggle.checked) {
             testModeToggle.checked = false;
-            testModeState = false;
             updateTestModeStatus();
         }
         
@@ -1407,8 +1347,7 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
         console.log(`📄 ${Object.keys(pdfDataStore).length} PDFs loaded`);
         console.log(`🔒 Test Mode: ${testModeToggle.checked ? 'ON' : 'OFF'}`);
         console.log('💾 Data persists across refreshes!');
-        console.log('🔑 Dummy password = Employee ID (when Test Mode is ON)');
-        console.log('✅ Test Mode will NOT auto-enable without admin permission.');
+        console.log('🔑 Dummy password = Employee ID (shown instantly when Test Mode is ON)');
         console.log('✅ Test Mode changes sync instantly across all browsers.');
         console.log('✅ Page refresh will NOT change test mode state.');
     }

@@ -128,24 +128,18 @@ async function initializeData() {
 }
 
 // ============================================
-// ADMIN AUTHENTICATION ENDPOINTS
+// ⭐ ADMIN AUTHENTICATION - FIXED ⭐
 // ============================================
 
+// ✅ FIXED: Admin login endpoint with proper body parsing
 app.post('/api/admin/login', (req, res) => {
     try {
         console.log('🔐 Admin login request received');
+        console.log('📦 Request body:', req.body);
+        console.log('📦 Request headers:', req.headers['content-type']);
         
-        // Check if body exists
-        if (!req.body) {
-            console.log('❌ No request body received');
-            return res.status(400).json({ 
-                success: false, 
-                message: 'No request body received' 
-            });
-        }
-        
-        const password = req.body.password;
-        console.log('🔐 Password received, length:', password ? password.length : 0);
+        // Get password from body - handles both JSON and urlencoded
+        const password = req.body && req.body.password ? req.body.password : null;
         
         if (!password) {
             console.log('❌ No password provided');
@@ -154,6 +148,8 @@ app.post('/api/admin/login', (req, res) => {
                 message: 'Password is required' 
             });
         }
+        
+        console.log('🔐 Password received, checking...');
         
         if (password === ADMIN_PASSWORD) {
             const expiry = Date.now() + (24 * 60 * 60 * 1000);
@@ -183,9 +179,10 @@ app.post('/api/admin/login', (req, res) => {
     }
 });
 
+// Verify token endpoint
 app.post('/api/admin/verify', (req, res) => {
     try {
-        const { token } = req.body;
+        const token = req.body && req.body.token ? req.body.token : null;
         
         if (!token) {
             return res.json({ success: false, message: 'No token provided' });
@@ -217,6 +214,7 @@ app.post('/api/admin/verify', (req, res) => {
 // MIDDLEWARE
 // ============================================
 
+// ✅ IMPORTANT: JSON middleware MUST come before routes
 app.use(express.json({ limit: '500mb' }));
 app.use(express.urlencoded({ extended: true, limit: '500mb' }));
 

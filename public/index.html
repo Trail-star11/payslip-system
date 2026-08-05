@@ -236,7 +236,7 @@
                 <input type="password" id="adminPasswordInput" placeholder="Enter admin password" autocomplete="off" />
                 <button class="btn" id="adminUnlockBtn"><i class="fas fa-unlock-alt"></i> Unlock</button>
                 <div id="adminLockError" class="error-msg"></div>
-                <div class="hint"><i class="fas fa-key"></i> <strong>Default: admin123</strong></div>
+                <div class="hint"><i class="fas fa-key"></i> <strong>Enter the admin password</strong></div>
             </div>
         </div>
     </div>
@@ -329,7 +329,7 @@
 
         <div class="form-group">
             <label><i class="fas fa-id-badge"></i> Employee ID</label>
-            <input type="text" id="userEmpId" placeholder="e.g. PPRR0*******" />
+            <input type="text" id="userEmpId" placeholder="e.g. PPRR00476907" />
         </div>
         <div class="form-group">
             <label><i class="fas fa-lock"></i> Password</label>
@@ -429,12 +429,19 @@
 
     async function adminLogin(password) {
         try {
+            console.log('🔐 Sending login request...');
+            
             const response = await fetch('/api/admin/login', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ password })
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                },
+                body: JSON.stringify({ password: password })
             });
+            
             const data = await response.json();
+            console.log('📥 Login response received');
             
             if (data.success) {
                 adminToken = data.token;
@@ -445,7 +452,7 @@
             }
         } catch (error) {
             console.error('Login error:', error);
-            return { success: false, message: 'Server error' };
+            return { success: false, message: 'Server error: ' + error.message };
         }
     }
 
@@ -705,6 +712,8 @@
 
     adminUnlockBtn.addEventListener('click', async function() {
         const pass = adminPasswordInput.value.trim();
+        console.log('🔐 Unlock button clicked, password length:', pass ? pass.length : 0);
+        
         if (!pass) {
             adminLockError.textContent = 'Please enter the admin password.';
             return;
@@ -713,16 +722,21 @@
         adminLockError.textContent = '⏳ Verifying...';
         adminUnlockBtn.disabled = true;
         
-        const result = await adminLogin(pass);
-        
-        adminUnlockBtn.disabled = false;
-        
-        if (result.success) {
-            unlockAdmin();
-        } else {
-            adminLockError.textContent = '❌ ' + (result.message || 'Incorrect password. Try again.');
-            adminPasswordInput.value = '';
-            adminPasswordInput.focus();
+        try {
+            const result = await adminLogin(pass);
+            adminUnlockBtn.disabled = false;
+            
+            if (result.success) {
+                unlockAdmin();
+            } else {
+                adminLockError.textContent = '❌ ' + (result.message || 'Incorrect password. Try again.');
+                adminPasswordInput.value = '';
+                adminPasswordInput.focus();
+            }
+        } catch (error) {
+            adminUnlockBtn.disabled = false;
+            adminLockError.textContent = '❌ Server error: ' + error.message;
+            console.error('Unlock error:', error);
         }
     });
 

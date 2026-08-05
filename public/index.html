@@ -85,6 +85,7 @@
             transition: 0.2s;
         }
         .admin-lock-card .btn:hover { background: #0f172a; }
+        .admin-lock-card .btn:disabled { opacity: 0.6; cursor: not-allowed; }
         .admin-lock-card .error-msg {
             color: #dc2626;
             font-size: 0.85rem;
@@ -709,12 +710,14 @@
     });
 
     // ============================================
-    // ⭐ ADMIN LOGIN - FIXED ⭐
+    // ⭐ FIXED: ADMIN LOGIN BUTTON HANDLER
     // ============================================
 
     adminUnlockBtn.addEventListener('click', async function() {
         const pass = adminPasswordInput.value.trim();
-        console.log('🔐 Unlock button clicked, password length:', pass ? pass.length : 0);
+        console.log('🔐 Unlock button clicked');
+        console.log('📝 Password length:', pass ? pass.length : 0);
+        console.log('📝 Password value:', pass ? '***hidden***' : 'EMPTY');
         
         if (!pass) {
             adminLockError.textContent = 'Please enter the admin password.';
@@ -723,13 +726,34 @@
         
         adminLockError.textContent = '⏳ Verifying...';
         adminUnlockBtn.disabled = true;
+        adminUnlockBtn.textContent = '⏳ Verifying...';
         
         try {
-            const result = await adminLogin(pass);
+            console.log('📤 Sending login request...');
+            
+            const response = await fetch('/api/admin/login', {
+                method: 'POST',
+                headers: { 
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ password: pass })
+            });
+            
+            console.log('📥 Response status:', response.status);
+            const result = await response.json();
+            console.log('📥 Response data:', result);
+            
             adminUnlockBtn.disabled = false;
+            adminUnlockBtn.textContent = 'Unlock';
             
             if (result.success) {
+                // Store the token
+                if (result.token) {
+                    sessionStorage.setItem('adminToken', result.token);
+                }
+                adminToken = result.token;
                 unlockAdmin();
+                adminLockError.textContent = '';
             } else {
                 adminLockError.textContent = '❌ ' + (result.message || 'Incorrect password. Try again.');
                 adminPasswordInput.value = '';
@@ -737,8 +761,9 @@
             }
         } catch (error) {
             adminUnlockBtn.disabled = false;
+            adminUnlockBtn.textContent = 'Unlock';
             adminLockError.textContent = '❌ Server error: ' + error.message;
-            console.error('Unlock error:', error);
+            console.error('❌ Unlock error:', error);
         }
     });
 

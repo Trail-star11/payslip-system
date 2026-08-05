@@ -424,12 +424,12 @@
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
 
     // ============================================
-    // ADMIN AUTHENTICATION (Server-side)
+    // ⭐ ADMIN AUTHENTICATION - FIXED ⭐
     // ============================================
 
     async function adminLogin(password) {
         try {
-            console.log('🔐 Sending login request...');
+            console.log('🔐 Sending login request with password length:', password ? password.length : 0);
             
             const response = await fetch('/api/admin/login', {
                 method: 'POST',
@@ -440,8 +440,10 @@
                 body: JSON.stringify({ password: password })
             });
             
+            console.log('📥 Response status:', response.status);
+            
             const data = await response.json();
-            console.log('📥 Login response received');
+            console.log('📥 Response data:', data);
             
             if (data.success) {
                 adminToken = data.token;
@@ -707,7 +709,7 @@
     });
 
     // ============================================
-    // ADMIN LOGIN - Uses Server-Side Auth
+    // ⭐ ADMIN LOGIN - FIXED ⭐
     // ============================================
 
     adminUnlockBtn.addEventListener('click', async function() {
@@ -741,7 +743,9 @@
     });
 
     adminPasswordInput.addEventListener('keydown', function(e) {
-        if (e.key === 'Enter') adminUnlockBtn.click();
+        if (e.key === 'Enter') {
+            adminUnlockBtn.click();
+        }
     });
 
     adminToggleLink.addEventListener('click', function() {
@@ -1388,7 +1392,7 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
     });
 
     // ============================================
-    // INIT - Check for existing admin token
+    // INIT
     // ============================================
 
     async function init() {

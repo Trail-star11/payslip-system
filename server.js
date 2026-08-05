@@ -23,6 +23,28 @@ console.log('🚀 Starting server...');
 console.log('🔒 Admin password is set from environment variables');
 
 // ============================================
+// ✅ FIXED: Middleware MUST come BEFORE routes
+// ============================================
+
+// ⭐ IMPORTANT: JSON middleware must be first!
+app.use(express.json({ limit: '500mb' }));
+app.use(express.urlencoded({ extended: true, limit: '500mb' }));
+
+// CORS middleware
+app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type');
+    if (req.method === 'OPTIONS') {
+        return res.sendStatus(200);
+    }
+    next();
+});
+
+// Serve static files
+app.use(express.static('public'));
+
+// ============================================
 // MONGODB CONNECTION
 // ============================================
 
@@ -128,17 +150,15 @@ async function initializeData() {
 }
 
 // ============================================
-// ⭐ ADMIN AUTHENTICATION - FIXED ⭐
+// ⭐ FIXED: ADMIN AUTHENTICATION
 // ============================================
 
-// ✅ FIXED: Admin login endpoint with proper body parsing
 app.post('/api/admin/login', (req, res) => {
     try {
         console.log('🔐 Admin login request received');
         console.log('📦 Request body:', req.body);
-        console.log('📦 Request headers:', req.headers['content-type']);
         
-        // Get password from body - handles both JSON and urlencoded
+        // Get password from body - now req.body is defined!
         const password = req.body && req.body.password ? req.body.password : null;
         
         if (!password) {
@@ -209,28 +229,6 @@ app.post('/api/admin/verify', (req, res) => {
         res.json({ success: false, message: 'Server error' });
     }
 });
-
-// ============================================
-// MIDDLEWARE
-// ============================================
-
-// ✅ IMPORTANT: JSON middleware MUST come before routes
-app.use(express.json({ limit: '500mb' }));
-app.use(express.urlencoded({ extended: true, limit: '500mb' }));
-
-// CORS
-app.use((req, res, next) => {
-    res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type');
-    if (req.method === 'OPTIONS') {
-        return res.sendStatus(200);
-    }
-    next();
-});
-
-// Serve static files
-app.use(express.static('public'));
 
 // ============================================
 // API ROUTES

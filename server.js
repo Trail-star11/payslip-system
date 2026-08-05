@@ -128,17 +128,27 @@ async function initializeData() {
 }
 
 // ============================================
-// ADMIN AUTHENTICATION ENDPOINTS ✅ FIXED
+// ADMIN AUTHENTICATION ENDPOINTS
 // ============================================
 
-// Admin login endpoint
 app.post('/api/admin/login', (req, res) => {
     try {
-        const { password } = req.body;
+        console.log('🔐 Admin login request received');
         
-        console.log('🔐 Admin login attempt received');
+        // Check if body exists
+        if (!req.body) {
+            console.log('❌ No request body received');
+            return res.status(400).json({ 
+                success: false, 
+                message: 'No request body received' 
+            });
+        }
+        
+        const password = req.body.password;
+        console.log('🔐 Password received, length:', password ? password.length : 0);
         
         if (!password) {
+            console.log('❌ No password provided');
             return res.status(400).json({ 
                 success: false, 
                 message: 'Password is required' 
@@ -146,13 +156,11 @@ app.post('/api/admin/login', (req, res) => {
         }
         
         if (password === ADMIN_PASSWORD) {
-            // Generate a simple session token (expires in 24 hours)
             const expiry = Date.now() + (24 * 60 * 60 * 1000);
             const tokenData = `${expiry}:${password}`;
             const token = Buffer.from(tokenData).toString('base64');
             
             console.log('✅ Admin login successful');
-            
             res.json({ 
                 success: true, 
                 token: token,
@@ -175,7 +183,6 @@ app.post('/api/admin/login', (req, res) => {
     }
 });
 
-// Verify token endpoint
 app.post('/api/admin/verify', (req, res) => {
     try {
         const { token } = req.body;
@@ -274,7 +281,6 @@ app.post('/api/data', async (req, res) => {
     }
 });
 
-// Health check
 app.get('/health', async (req, res) => {
     try {
         const data = await loadDataFromMongoDB();

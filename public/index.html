@@ -370,7 +370,6 @@
 
 <script>
 (function() {
-    const ADMIN_PASSWORD = 'admin123';
     const API_BASE = '/api';
 
     let employeeData = [];
@@ -384,6 +383,7 @@
     let dataLoaded = false;
     let isTestModeChanging = false;
     let manualTestModeOverride = false;
+    let adminToken = sessionStorage.getItem('adminToken') || null;
 
     const $ = id => document.getElementById(id);
     const adminStatus = $('adminStatus');
@@ -423,7 +423,53 @@
 
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
 
-    // ---------- API CALLS ----------
+    // ============================================
+    // ADMIN AUTHENTICATION (Server-side)
+    // ============================================
+
+    async function adminLogin(password) {
+        try {
+            const response = await fetch('/api/admin/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password })
+            });
+            const data = await response.json();
+            
+            if (data.success) {
+                adminToken = data.token;
+                sessionStorage.setItem('adminToken', adminToken);
+                return { success: true, token: adminToken };
+            } else {
+                return { success: false, message: data.message || 'Invalid password' };
+            }
+        } catch (error) {
+            console.error('Login error:', error);
+            return { success: false, message: 'Server error' };
+        }
+    }
+
+    async function verifyAdminToken() {
+        if (!adminToken) return false;
+        
+        try {
+            const response = await fetch('/api/admin/verify', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token: adminToken })
+            });
+            const data = await response.json();
+            return data.success || false;
+        } catch (error) {
+            console.error('Verify error:', error);
+            return false;
+        }
+    }
+
+    // ============================================
+    // API CALLS
+    // ============================================
+
     async function apiCall(endpoint, options = {}) {
         const url = `${API_BASE}${endpoint}`;
         const response = await fetch(url, {
@@ -440,7 +486,10 @@
         return response.json();
     }
 
-    // ---------- LOAD DATA FROM SERVER ----------
+    // ============================================
+    // LOAD DATA FROM SERVER
+    // ============================================
+
     async function loadDataFromServer(force = false) {
         if (isRefreshing && !force) return;
         isRefreshing = true;
@@ -452,9 +501,6 @@
             if (data && data.employees) {
                 employeeData = data.employees;
                 
-                // ============================================
-                // ✅ FIX: Load PDF data from server properly
-                // ============================================
                 if (data.pdfs) {
                     pdfDataStore = {};
                     let loadedCount = 0;
@@ -462,7 +508,6 @@
                     for (const [filename, pdfData] of Object.entries(data.pdfs)) {
                         if (pdfData.bytes) {
                             try {
-                                // Decode base64 to binary
                                 const binaryString = atob(pdfData.bytes);
                                 const bytes = new Uint8Array(binaryString.length);
                                 for (let i = 0; i < binaryString.length; i++) {
@@ -482,7 +527,6 @@
                     console.log(`📄 Total PDFs loaded: ${loadedCount}`);
                 }
                 
-                // Load test mode from server
                 if (!manualTestModeOverride && !isTestModeChanging) {
                     if (data.settings && data.settings.testMode !== undefined) {
                         testModeToggle.checked = data.settings.testMode;
@@ -514,15 +558,15 @@
         }
     }
 
-    // ---------- SAVE DATA TO SERVER ----------
+    // ============================================
+    // SAVE DATA TO SERVER
+    // ============================================
+
     async function saveDataToServer(employees, pdfs = null, settings = null) {
         try {
             console.log('💾 Saving data to server...');
             const data = { employees };
             
-            // ============================================
-            // ✅ FIX: Save PDFs with proper base64 encoding
-            // ============================================
             if (pdfs) {
                 data.pdfs = {};
                 for (const [filename, pdfData] of Object.entries(pdfs)) {
@@ -542,7 +586,6 @@
                     }
                 }
             } else if (Object.keys(pdfDataStore).length > 0) {
-                // Save existing pdfDataStore
                 data.pdfs = {};
                 for (const [filename, pdfData] of Object.entries(pdfDataStore)) {
                     try {
@@ -584,7 +627,10 @@
         }
     }
 
-    // ---------- AUTO REFRESH ----------
+    // ============================================
+    // AUTO REFRESH
+    // ============================================
+
     function startAutoRefresh() {
         if (autoRefreshInterval) clearInterval(autoRefreshInterval);
         autoRefreshInterval = setInterval(async () => {
@@ -595,9 +641,14 @@
         }, 10000);
     }
 
-    // ---------- ADMIN LOCK ----------
+    // ============================================
+    // ADMIN LOCK
+    // ============================================
+
     function lockAdmin() {
         adminUnlocked = false;
+        adminToken = null;
+        sessionStorage.removeItem('adminToken');
         adminLockOverlay.classList.remove('hidden');
         adminPasswordInput.value = '';
         adminLockError.textContent = '';
@@ -613,7 +664,7 @@
         setTimeout(() => adminPasswordInput.focus(), 100);
     }
 
-    function unlockAdmin() {
+    async function unlockAdmin() {
         adminUnlocked = true;
         adminLockOverlay.classList.add('hidden');
         if (adminTabBtn) {
@@ -621,7 +672,7 @@
         }
         setAdminMsg('🔓 Admin panel unlocked.', 'success');
         if (adminTabBtn) adminTabBtn.click();
-        loadDataFromServer(true);
+        await loadDataFromServer(true);
     }
 
     function closeAdminLock() {
@@ -648,12 +699,28 @@
         }
     });
 
-    adminUnlockBtn.addEventListener('click', function() {
+    // ============================================
+    // ADMIN LOGIN - Uses Server-Side Auth
+    // ============================================
+
+    adminUnlockBtn.addEventListener('click', async function() {
         const pass = adminPasswordInput.value.trim();
-        if (pass === ADMIN_PASSWORD) {
+        if (!pass) {
+            adminLockError.textContent = 'Please enter the admin password.';
+            return;
+        }
+        
+        adminLockError.textContent = '⏳ Verifying...';
+        adminUnlockBtn.disabled = true;
+        
+        const result = await adminLogin(pass);
+        
+        adminUnlockBtn.disabled = false;
+        
+        if (result.success) {
             unlockAdmin();
         } else {
-            adminLockError.textContent = '❌ Incorrect password. Try again.';
+            adminLockError.textContent = '❌ ' + (result.message || 'Incorrect password. Try again.');
             adminPasswordInput.value = '';
             adminPasswordInput.focus();
         }
@@ -672,7 +739,10 @@
         }
     });
 
-    // ---------- HELPERS ----------
+    // ============================================
+    // HELPERS
+    // ============================================
+
     function findEmployee(empId) {
         return employeeData.find(e => e.empId.toLowerCase() === empId.toLowerCase()) || null;
     }
@@ -736,7 +806,10 @@
         return emp && emp.empId ? emp.empId : 'dummy123';
     }
 
-    // ---------- EXTRACT FUNCTIONS ----------
+    // ============================================
+    // EXTRACT FUNCTIONS
+    // ============================================
+
     function extractName(text) {
         const patterns = [
             /Name of the Employee[:.\s]*([A-Z\s]+?)(?=\s+No of Days|\s+Emp Code|\s+Aadhaar|\s+Designation|$)/i,
@@ -780,7 +853,10 @@
         return null;
     }
 
-    // ---------- RENDER ----------
+    // ============================================
+    // RENDER FUNCTIONS
+    // ============================================
+
     function renderEmployeeList() {
         employeeCount.textContent = employeeData.length;
         const withPdf = employeeData.filter(e => e.pageNumber && e.pdfFile && pdfDataStore[e.pdfFile]).length;
@@ -836,7 +912,10 @@
         });
     }
 
-    // ---------- EXTRACT PAGE FROM PDF ----------
+    // ============================================
+    // EXTRACT PAGE FROM PDF
+    // ============================================
+
     async function extractPageFromPdf(filename, pageNumber) {
         const pdfData = pdfDataStore[filename];
         if (!pdfData) {
@@ -853,7 +932,10 @@
         }
     }
 
-    // ---------- PROCESS DATA ----------
+    // ============================================
+    // PROCESS DATA
+    // ============================================
+
     $('processDataBtn').addEventListener('click', async function() {
         if (!adminUnlocked) { lockAdmin(); return; }
         if (!csvData && pdfFiles.length === 0) {
@@ -908,13 +990,9 @@
                     const pdfFile = pdfFiles[p];
                     progressText.textContent = `Loading PDF ${p + 1}/${pdfFiles.length}: ${pdfFile.name}...`;
                     
-                    // ============================================
-                    // ✅ FIX: Read PDF as ArrayBuffer and store
-                    // ============================================
                     const arrayBuffer = await pdfFile.arrayBuffer();
                     const pdfBytes = new Uint8Array(arrayBuffer);
                     
-                    // Store PDF data
                     pdfDataStore[pdfFile.name] = { 
                         bytes: pdfBytes.buffer, 
                         pages: 0 
@@ -983,9 +1061,6 @@
 
             employeeData = mergedData;
             
-            // ============================================
-            // ✅ FIX: Save with all PDF data
-            // ============================================
             const currentTestMode = testModeToggle.checked;
             const saved = await saveDataToServer(employeeData, pdfDataStore, { testMode: currentTestMode });
             if (!saved) {
@@ -994,7 +1069,6 @@
                 return;
             }
 
-            // Clear uploaded files after processing
             pdfFiles = [];
             csvData = null;
             csvFileName.textContent = '';
@@ -1018,7 +1092,10 @@
         }
     });
 
-    // ---------- REFRESH DATA ----------
+    // ============================================
+    // REFRESH DATA
+    // ============================================
+
     $('refreshDataBtn').addEventListener('click', async function() {
         if (!adminUnlocked) { lockAdmin(); return; }
         manualTestModeOverride = false;
@@ -1027,7 +1104,10 @@
         setAdminMsg('🔄 Data refreshed from server.', 'success');
     });
 
-    // ---------- DOWNLOAD SAMPLE CSV ----------
+    // ============================================
+    // DOWNLOAD SAMPLE CSV
+    // ============================================
+
     $('downloadSampleBtn').addEventListener('click', function() {
         if (!adminUnlocked) { lockAdmin(); return; }
         const csvContent = `empId,name,password
@@ -1046,7 +1126,10 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
         setAdminMsg('✅ Sample CSV downloaded!', 'success');
     });
 
-    // ---------- CLEAR ALL ----------
+    // ============================================
+    // CLEAR ALL
+    // ============================================
+
     $('clearAllData').addEventListener('click', async function() {
         if (!adminUnlocked) { lockAdmin(); return; }
         if (confirm('⚠️ Delete all employee data? This cannot be undone.')) {
@@ -1069,7 +1152,10 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
         }
     });
 
-    // ---------- CSV + PDF FILE HANDLERS ----------
+    // ============================================
+    // CSV + PDF FILE HANDLERS
+    // ============================================
+
     $('csvFileInput').addEventListener('change', function(e) {
         if (!adminUnlocked) { lockAdmin(); return; }
         const file = e.target.files[0];
@@ -1095,7 +1181,10 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
         }
     });
 
-    // ---------- TEST MODE TOGGLE ----------
+    // ============================================
+    // TEST MODE TOGGLE
+    // ============================================
+
     testModeToggle.addEventListener('change', function() {
         if (!adminUnlocked) { 
             lockAdmin(); 
@@ -1121,7 +1210,10 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
         }, 3000);
     });
 
-    // ---------- USER: LOGIN WITH PASSWORD ----------
+    // ============================================
+    // USER LOGIN
+    // ============================================
+
     $('loginWithPasswordBtn').addEventListener('click', async function() {
         await loadDataFromServer(true);
         
@@ -1166,7 +1258,10 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
         }
     });
 
-    // ---------- SHOW PAYSLIP ----------
+    // ============================================
+    // SHOW PAYSLIP
+    // ============================================
+
     async function showPayslip(user) {
         if (!user) { setUserMsg('No user data available.', 'error'); return; }
 
@@ -1208,7 +1303,10 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
         }
     }
 
-    // ---------- DOWNLOAD PDF ----------
+    // ============================================
+    // DOWNLOAD PDF
+    // ============================================
+
     downloadBtn.addEventListener('click', function() {
         const pdfBlobUrl = payslipArea.dataset.pdfBlobUrl;
         const pdfName = payslipArea.dataset.pdfName || 'payslip.pdf';
@@ -1226,7 +1324,10 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
         }
     });
 
-    // ---------- CHECK USER STATUS ----------
+    // ============================================
+    // CHECK USER STATUS
+    // ============================================
+
     $('checkUserStatus').addEventListener('click', async function() {
         await loadDataFromServer(true);
         const empId = userEmpId.value.trim();
@@ -1244,14 +1345,20 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
         }
     });
 
-    // ---------- EMPLOYEE ID INPUT ----------
+    // ============================================
+    // EMPLOYEE ID INPUT
+    // ============================================
+
     userEmpId.addEventListener('input', function() {
         if (testModeToggle.checked) {
             showDummyPassword();
         }
     });
 
-    // ---------- TAB SWITCHING ----------
+    // ============================================
+    // TAB SWITCHING
+    // ============================================
+
     document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.addEventListener('click', function() {
             if (this.dataset.tab === 'tab-admin' && !adminUnlocked) {
@@ -1266,12 +1373,28 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
         });
     });
 
-    // ---------- INIT ----------
+    // ============================================
+    // INIT - Check for existing admin token
+    // ============================================
+
     async function init() {
         adminUnlocked = false;
         adminLockOverlay.classList.add('hidden');
         if (adminTabBtn) adminTabBtn.classList.remove('visible');
         adminToggleLink.style.display = 'flex';
+
+        // Check if admin token exists and is valid
+        if (adminToken) {
+            const isValid = await verifyAdminToken();
+            if (isValid) {
+                adminUnlocked = true;
+                if (adminTabBtn) adminTabBtn.classList.add('visible');
+                console.log('🔓 Admin token restored from session');
+            } else {
+                sessionStorage.removeItem('adminToken');
+                adminToken = null;
+            }
+        }
 
         await loadDataFromServer(true);
         
@@ -1289,6 +1412,8 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
         console.log(`📊 ${employeeData.length} employees`);
         console.log(`📄 ${Object.keys(pdfDataStore).length} PDFs`);
         console.log(`🔒 Test Mode: ${testModeToggle.checked ? 'ON' : 'OFF'}`);
+        console.log('🔐 Admin auth: Server-side (secure)');
+        console.log('🔑 Admin password is NOT in the code!');
     }
 
     userTabBtn.classList.add('active');

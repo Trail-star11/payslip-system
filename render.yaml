@@ -13,3 +13,5 @@ services:
         value: mongodb+srv://trail_db_user:ZFjmUOMVSdatCOsq@cluster0.h1pqrer.mongodb.net/?retryWrites=true&w=majority
       - key: DB_NAME
         value: payslip_system
+      - key: ADMIN_PASSWORD
+        value: YOUR_STRONG_PASSWORD_HERE

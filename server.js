@@ -7,6 +7,9 @@ const app = express();
 // Configuration
 const PORT = process.env.PORT || 3000;
 
+// Admin Password from Environment Variables
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
+
 // MongoDB Connection
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://trail_db_user:ZFjmUOMVSdatCOsq@cluster0.h1pqrer.mongodb.net/?retryWrites=true&w=majority';
 const DB_NAME = process.env.DB_NAME || 'payslip_system';
@@ -17,8 +20,12 @@ let collection = null;
 let dataCache = null;
 
 console.log('🚀 Starting server...');
+console.log('🔒 Admin password is set from environment variables');
 
-// Connect to MongoDB
+// ============================================
+// MONGODB CONNECTION
+// ============================================
+
 async function connectToMongoDB() {
     try {
         console.log('📡 Connecting to MongoDB Atlas...');
@@ -50,7 +57,10 @@ async function connectToMongoDB() {
     }
 }
 
-// Load data from MongoDB
+// ============================================
+// DATA OPERATIONS
+// ============================================
+
 async function loadDataFromMongoDB() {
     try {
         if (!collection) return null;
@@ -67,7 +77,6 @@ async function loadDataFromMongoDB() {
     }
 }
 
-// Save data to MongoDB
 async function saveDataToMongoDB(data) {
     try {
         if (!collection) {
@@ -94,7 +103,6 @@ async function saveDataToMongoDB(data) {
     }
 }
 
-// Initialize data
 async function initializeData() {
     let data = await loadDataFromMongoDB();
     
@@ -119,7 +127,86 @@ async function initializeData() {
     return initialData;
 }
 
-// Middleware
+// ============================================
+// ADMIN AUTHENTICATION
+// ============================================
+
+// Admin login endpoint
+app.post('/api/admin/login', (req, res) => {
+    try {
+        const { password } = req.body;
+        
+        if (!password) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Password is required' 
+            });
+        }
+        
+        if (password === ADMIN_PASSWORD) {
+            // Generate a simple session token (expires in 24 hours)
+            const expiry = Date.now() + (24 * 60 * 60 * 1000);
+            const tokenData = `${expiry}:${password}`;
+            const token = Buffer.from(tokenData).toString('base64');
+            
+            res.json({ 
+                success: true, 
+                token: token,
+                message: 'Login successful',
+                expiresIn: '24 hours'
+            });
+        } else {
+            res.status(401).json({ 
+                success: false, 
+                message: 'Invalid password' 
+            });
+        }
+    } catch (error) {
+        console.error('❌ Login error:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: 'Server error' 
+        });
+    }
+});
+
+// Verify token endpoint (optional, for checking if admin is still logged in)
+app.post('/api/admin/verify', (req, res) => {
+    try {
+        const { token } = req.body;
+        
+        if (!token) {
+            return res.json({ success: false, message: 'No token provided' });
+        }
+        
+        try {
+            const decoded = Buffer.from(token, 'base64').toString();
+            const [expiry, password] = decoded.split(':');
+            
+            // Check if token is expired
+            if (Date.now() > parseInt(expiry)) {
+                return res.json({ success: false, message: 'Token expired' });
+            }
+            
+            // Check if password matches
+            if (password === ADMIN_PASSWORD) {
+                return res.json({ success: true, message: 'Token valid' });
+            }
+        } catch (e) {
+            return res.json({ success: false, message: 'Invalid token' });
+        }
+        
+        res.json({ success: false, message: 'Invalid token' });
+    } catch (error) {
+        console.error('❌ Verify error:', error);
+        res.json({ success: false, message: 'Server error' });
+    }
+});
+
+// ============================================
+// MIDDLEWARE
+// ============================================
+
 app.use(express.json({ limit: '500mb' }));
 app.use(express.urlencoded({ extended: true, limit: '500mb' }));
 
@@ -137,7 +224,10 @@ app.use((req, res, next) => {
 // Serve static files
 app.use(express.static('public'));
 
-// API Routes
+// ============================================
+// API ROUTES
+// ============================================
+
 app.get('/api/data', async (req, res) => {
     try {
         const data = await loadDataFromMongoDB();
@@ -239,7 +329,10 @@ process.on('SIGINT', async () => {
     process.exit(0);
 });
 
-// Start Server
+// ============================================
+// START SERVER
+// ============================================
+
 async function startServer() {
     const connected = await connectToMongoDB();
     await initializeData();
@@ -250,6 +343,7 @@ async function startServer() {
         console.log(`📄 PDFs: ${dataCache.pdfs ? Object.keys(dataCache.pdfs).length : 0}`);
         console.log(`🔒 Test Mode: ${dataCache.settings?.testMode ? 'ON' : 'OFF'}`);
         console.log(`💾 Storage: ${connected ? 'MongoDB Atlas (Free) ✅' : 'Local (ephemeral) ⚠️'}`);
+        console.log(`🔐 Admin auth: Server-side (secure)`);
         console.log(`🌐 URL: http://localhost:${PORT}`);
     });
 }

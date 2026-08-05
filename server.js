@@ -128,13 +128,15 @@ async function initializeData() {
 }
 
 // ============================================
-// ADMIN AUTHENTICATION
+// ADMIN AUTHENTICATION ENDPOINTS ✅ FIXED
 // ============================================
 
 // Admin login endpoint
 app.post('/api/admin/login', (req, res) => {
     try {
         const { password } = req.body;
+        
+        console.log('🔐 Admin login attempt received');
         
         if (!password) {
             return res.status(400).json({ 
@@ -149,6 +151,8 @@ app.post('/api/admin/login', (req, res) => {
             const tokenData = `${expiry}:${password}`;
             const token = Buffer.from(tokenData).toString('base64');
             
+            console.log('✅ Admin login successful');
+            
             res.json({ 
                 success: true, 
                 token: token,
@@ -156,6 +160,7 @@ app.post('/api/admin/login', (req, res) => {
                 expiresIn: '24 hours'
             });
         } else {
+            console.log('❌ Admin login failed: Invalid password');
             res.status(401).json({ 
                 success: false, 
                 message: 'Invalid password' 
@@ -165,12 +170,12 @@ app.post('/api/admin/login', (req, res) => {
         console.error('❌ Login error:', error);
         res.status(500).json({ 
             success: false, 
-            message: 'Server error' 
+            message: 'Server error: ' + error.message 
         });
     }
 });
 
-// Verify token endpoint (optional, for checking if admin is still logged in)
+// Verify token endpoint
 app.post('/api/admin/verify', (req, res) => {
     try {
         const { token } = req.body;
@@ -183,12 +188,10 @@ app.post('/api/admin/verify', (req, res) => {
             const decoded = Buffer.from(token, 'base64').toString();
             const [expiry, password] = decoded.split(':');
             
-            // Check if token is expired
             if (Date.now() > parseInt(expiry)) {
                 return res.json({ success: false, message: 'Token expired' });
             }
             
-            // Check if password matches
             if (password === ADMIN_PASSWORD) {
                 return res.json({ success: true, message: 'Token valid' });
             }

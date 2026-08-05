@@ -537,12 +537,16 @@
                     console.log(`📄 Total PDFs loaded: ${loadedCount}`);
                 }
                 
+                // ⭐ FIXED: Sync test mode from server
                 if (!manualTestModeOverride && !isTestModeChanging) {
                     if (data.settings && data.settings.testMode !== undefined) {
-                        testModeToggle.checked = data.settings.testMode;
+                        const serverTestMode = data.settings.testMode;
+                        testModeToggle.checked = serverTestMode;
+                        lastTestModeState = serverTestMode;
                         updateTestModeStatus();
                     } else {
                         testModeToggle.checked = false;
+                        lastTestModeState = false;
                         updateTestModeStatus();
                     }
                 }
@@ -1225,7 +1229,83 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
     });
 
     // ============================================
-    // TEST MODE TOGGLE
+    // ⭐ TEST MODE SYNC - Real-time across devices
+    // ============================================
+
+    let testModeSyncInterval = null;
+    let lastTestModeState = false;
+
+    async function syncTestModeFromServer() {
+        try {
+            // Fetch latest data from server
+            const response = await fetch('/api/data');
+            const data = await response.json();
+            
+            if (data && data.settings && data.settings.testMode !== undefined) {
+                const serverTestMode = data.settings.testMode;
+                
+                // Check if test mode has changed on server
+                if (serverTestMode !== lastTestModeState) {
+                    console.log(`🔄 Test mode changed on server: ${serverTestMode ? 'ON' : 'OFF'}`);
+                    lastTestModeState = serverTestMode;
+                    
+                    // Update UI without triggering save loop
+                    const wasChanging = isTestModeChanging;
+                    isTestModeChanging = true;
+                    
+                    testModeToggle.checked = serverTestMode;
+                    updateTestModeStatus();
+                    
+                    // Show notification to user
+                    if (adminUnlocked) {
+                        setAdminMsg(`🔬 Test Mode ${serverTestMode ? 'ENABLED' : 'DISABLED'} (Updated from server)`, 
+                                   serverTestMode ? 'warning' : '');
+                    } else {
+                        setUserMsg(`🔬 Test Mode ${serverTestMode ? 'ENABLED' : 'DISABLED'} by Admin`, 
+                                   serverTestMode ? 'warning' : '');
+                    }
+                    
+                    // Clear any payslip display
+                    payslipArea.classList.remove('show');
+                    if (!serverTestMode) {
+                        dummyPasswordDisplay.classList.remove('show');
+                    }
+                    
+                    isTestModeChanging = wasChanging;
+                }
+                
+                // Always update last state
+                lastTestModeState = serverTestMode;
+            }
+        } catch (error) {
+            console.log('⚠️ Test mode sync failed:', error.message);
+        }
+    }
+
+    function startTestModeSync() {
+        // Clear existing interval
+        if (testModeSyncInterval) {
+            clearInterval(testModeSyncInterval);
+        }
+        
+        // Start new interval - check every 3 seconds (faster than data refresh)
+        testModeSyncInterval = setInterval(() => {
+            // Only sync if not currently changing and page is visible
+            if (!isTestModeChanging && !document.hidden) {
+                syncTestModeFromServer();
+            }
+        }, 3000); // Check every 3 seconds
+    }
+
+    function stopTestModeSync() {
+        if (testModeSyncInterval) {
+            clearInterval(testModeSyncInterval);
+            testModeSyncInterval = null;
+        }
+    }
+
+    // ============================================
+    // ⭐ FIXED: TEST MODE TOGGLE
     // ============================================
 
     testModeToggle.addEventListener('change', function() {
@@ -1237,20 +1317,31 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
         isTestModeChanging = true;
         manualTestModeOverride = true;
         
+        const newState = testModeToggle.checked;
+        lastTestModeState = newState;
+        
         updateTestModeStatus();
         payslipArea.classList.remove('show');
         
-        if (testModeToggle.checked) {
+        if (newState) {
             showDummyPassword();
+            setAdminMsg(`🔬 Test Mode ENABLED - Available on all devices now`, 'warning');
         } else {
             dummyPasswordDisplay.classList.remove('show');
+            setAdminMsg(`🔒 Test Mode DISABLED - Available on all devices now`, '');
         }
         
-        saveDataToServer(employeeData, null, { testMode: testModeToggle.checked });
+        // Save to server so other devices can sync
+        saveDataToServer(employeeData, null, { testMode: newState });
+        
+        // Also trigger immediate sync on other devices via the interval
+        // The interval will pick up the change in 1-3 seconds
         
         setTimeout(() => {
             isTestModeChanging = false;
-        }, 3000);
+            // Force a sync after saving to confirm
+            syncTestModeFromServer();
+        }, 1000);
     });
 
     // ============================================
@@ -1441,6 +1532,9 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
 
         await loadDataFromServer(true);
         
+        // Initialize last test mode state
+        lastTestModeState = testModeToggle.checked;
+        
         if (!testModeToggle.checked) {
             testModeToggle.checked = false;
             updateTestModeStatus();
@@ -1451,10 +1545,14 @@ TXIX13081,SACHIN BAISOYA,sachin!88`;
         
         startAutoRefresh();
         
+        // ⭐ START TEST MODE SYNC
+        startTestModeSync();
+        
         console.log('📄 Multi-device payslip system running.');
         console.log(`📊 ${employeeData.length} employees`);
         console.log(`📄 ${Object.keys(pdfDataStore).length} PDFs`);
         console.log(`🔒 Test Mode: ${testModeToggle.checked ? 'ON' : 'OFF'}`);
+        console.log(`🔄 Test Mode Sync: Enabled (checks every 3 seconds)`);
         console.log('🔐 Admin auth: Server-side (secure)');
         console.log('🔑 Admin password is NOT in the code!');
     }

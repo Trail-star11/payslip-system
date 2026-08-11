@@ -107,12 +107,8 @@
         .tab-btn.active i { color: white; }
         .tab-btn:hover:not(.active) { background: #f1f5f9; }
 
-        .tab-btn.admin-tab {
-            display: none;
-        }
-        .tab-btn.admin-tab.visible {
-            display: inline-flex;
-        }
+        .tab-btn.admin-tab { display: none; }
+        .tab-btn.admin-tab.visible { display: inline-flex; }
 
         .admin-toggle-link {
             position: fixed;
@@ -133,20 +129,9 @@
             gap: 0.4rem;
             user-select: none;
         }
-        .admin-toggle-link:hover {
-            background: #f1f5f9;
-            color: #1e293b;
-            border-color: #94a3b8;
-        }
-        .admin-toggle-link i {
-            color: #3b82f6;
-            font-size: 0.9rem;
-        }
-        .admin-toggle-link .lock-badge {
-            font-size: 0.6rem;
-            color: #94a3b8;
-            margin-left: 0.2rem;
-        }
+        .admin-toggle-link:hover { background: #f1f5f9; color: #1e293b; border-color: #94a3b8; }
+        .admin-toggle-link i { color: #3b82f6; font-size: 0.9rem; }
+        .admin-toggle-link .lock-badge { font-size: 0.6rem; color: #94a3b8; margin-left: 0.2rem; }
 
         .panel { display: none; background: white; border-radius: 32px; padding: 2rem 2.2rem; box-shadow: 0 20px 40px -12px rgba(0,0,0,0.08); border: 1px solid rgba(255,255,255,0.5); }
         .panel.active { display: block; }
@@ -330,7 +315,7 @@
 
         <div class="form-group">
             <label><i class="fas fa-id-badge"></i> Employee ID</label>
-            <input type="text" id="userEmpId" placeholder="e.g. PPRR0********" />
+            <input type="text" id="userEmpId" placeholder="e.g. PPRR0******** or TXIX*****" />
         </div>
         <div class="form-group">
             <label><i class="fas fa-lock"></i> Password</label>
@@ -385,6 +370,10 @@
     let isTestModeChanging = false;
     let manualTestModeOverride = false;
     let adminToken = sessionStorage.getItem('adminToken') || null;
+    
+    // Debug counters
+    let totalIdsFound = 0;
+    let uniqueIdsFound = 0;
 
     const $ = id => document.getElementById(id);
     const adminStatus = $('adminStatus');
@@ -425,48 +414,84 @@
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
 
     // ============================================
-    // ⭐ RAW PDF TEXT EXTRACTION - FALLBACK METHOD
+    // ⭐ ENHANCED ID EXTRACTION - CATCHES ALL FORMATS
     // ============================================
 
-    function extractRawTextFromPdfBytes(pdfBytes) {
-        try {
-            // Convert bytes to text using UTF-8 decoder
-            const decoder = new TextDecoder('utf-8', { fatal: false });
-            const text = decoder.decode(pdfBytes);
-            
-            // Look for employee IDs in raw data
-            const ids = [];
-            const idPatterns = [
-                /Emp\s*Code\s*(\d{4,6})/gi,
-                /Emp\s*Code\s*(PPRR\d+)/gi,
-                /Emp\s*Code\s*(TXIX\d+)/gi,
-                /Emp\s*Code\s*(T1UB\d+)/gi,
-                /PPRR(\d{4,6})/gi,
-                /TXIX(\d{4,6})/gi,
-                /T1UB(\d{4,6})/gi,
-                /PPRR[A-Z0-9]+/gi,
-                /TXIX[A-Z0-9]+/gi,
-                /T1UB[A-Z0-9]+/gi,
-            ];
-            
-            for (const pattern of idPatterns) {
-                let match;
-                while ((match = pattern.exec(text)) !== null) {
-                    let id = match[1] ? match[1].trim() : match[0].trim();
-                    if (/^\d+$/.test(id) && id.length >= 4 && id.length <= 6) {
-                        // Numeric ID - convert to PPRR
+    function extractAllIdsFromText(text) {
+        const ids = [];
+        const patterns = [
+            // PPRR format
+            /PPRR(\d+)/gi,
+            /PPRR[A-Z0-9]+/gi,
+            // TXIX format
+            /TXIX(\d+)/gi,
+            /TXIX[A-Z0-9]+/gi,
+            // T1UB format
+            /T1UB(\d+)/gi,
+            /T1UB[A-Z0-9]+/gi,
+            // Emp Code with number
+            /Emp\s*Code\s*[:.\s]*(\d{4,6})/gi,
+            /Emp\s*Code\s*[:.\s]*(PPRR\d+)/gi,
+            /Emp\s*Code\s*[:.\s]*(TXIX\d+)/gi,
+            /Emp\s*Code\s*[:.\s]*(T1UB\d+)/gi,
+            // Employee Code
+            /Employee\s*Code\s*[:.\s]*(\d{4,6})/gi,
+            /Employee\s*Code\s*[:.\s]*(PPRR\d+)/gi,
+            /Employee\s*Code\s*[:.\s]*(TXIX\d+)/gi,
+            // Just numbers with 4-6 digits (potential employee IDs)
+            /\b(\d{4,6})\b/gi,
+        ];
+        
+        for (const pattern of patterns) {
+            let match;
+            while ((match = pattern.exec(text)) !== null) {
+                let id = match[1] ? match[1].trim() : match[0].trim();
+                // If it's a plain number, convert to PPRR
+                if (/^\d{4,6}$/.test(id)) {
+                    // Check if it's a valid employee ID length
+                    if (id.length >= 4 && id.length <= 6) {
                         const pprrId = `PPRR${id}`;
                         if (!ids.includes(pprrId)) {
                             ids.push(pprrId);
                         }
-                    } else if (id.length >= 4) {
-                        id = id.replace(/[^A-Z0-9]/g, '');
-                        if (id.length >= 4 && !ids.includes(id)) {
-                            ids.push(id);
-                        }
+                    }
+                } else {
+                    // Clean the ID
+                    id = id.replace(/[^A-Z0-9]/g, '');
+                    if (id.length >= 4 && !ids.includes(id)) {
+                        ids.push(id);
                     }
                 }
             }
+        }
+        
+        return ids;
+    }
+
+    function extractEmpIdFromText(text) {
+        const ids = extractAllIdsFromText(text);
+        if (ids.length > 0) {
+            // Return the first valid ID found
+            for (const id of ids) {
+                if (id.length >= 4 && id.length <= 12) {
+                    console.log(`✅ Found ID: ${id}`);
+                    return id;
+                }
+            }
+        }
+        return null;
+    }
+
+    // ============================================
+    // RAW PDF TEXT EXTRACTION
+    // ============================================
+
+    function extractRawTextFromPdfBytes(pdfBytes) {
+        try {
+            const decoder = new TextDecoder('utf-8', { fatal: false });
+            const text = decoder.decode(pdfBytes);
+            
+            const ids = extractAllIdsFromText(text);
             
             // Look for names
             const names = [];
@@ -485,71 +510,6 @@
             console.error('❌ Raw extraction error:', error.message);
             return { ids: [], names: [], rawText: '' };
         }
-    }
-
-    // ============================================
-    // EXTRACT EMPLOYEE ID - Enhanced with raw fallback
-    // ============================================
-
-    function extractEmpId(text, rawText = '') {
-        // First try standard extraction from text
-        const patterns = [
-            /(PPRR[A-Z0-9]+)/i,
-            /Emp Code[:.\s]*(PPRR[A-Z0-9]+)/i,
-            /Emp Code[:.\s]*([A-Z0-9\/]+)/i,
-            /Employee Code[:.\s]*(PPRR[A-Z0-9]+)/i,
-            /(TXIX[A-Z0-9]+)/i,
-            /(T1UB[A-Z0-9]+)/i,
-            /Emp Code[:.\s]*([0-9]{4,6})/i,
-            /\b([A-Z]{2,4}[0-9]{4,6})\b/i,
-        ];
-        
-        for (const pattern of patterns) {
-            const match = text.match(pattern);
-            if (match) {
-                let id = match[1].trim().toUpperCase();
-                id = id.replace(/[^A-Z0-9]/g, '');
-                
-                // If it's just a number, convert to PPRR
-                if (/^\d+$/.test(id) && id.length >= 4 && id.length <= 6) {
-                    // Check if this numeric ID exists in our data
-                    if (employeeData && employeeData.length > 0) {
-                        for (const emp of employeeData) {
-                            const empNumeric = emp.empId.toUpperCase().replace(/^[A-Z]+/, '');
-                            if (empNumeric === id) {
-                                console.log(`✅ Matched numeric ID ${id} to existing employee ${emp.empId}`);
-                                return emp.empId.toUpperCase();
-                            }
-                        }
-                    }
-                    const pprrId = `PPRR${id}`;
-                    console.log(`⚠️ Converting numeric ID ${id} to ${pprrId}`);
-                    return pprrId;
-                }
-                
-                if (id.length >= 4) {
-                    console.log(`✅ Found ID: ${id}`);
-                    return id;
-                }
-            }
-        }
-        
-        // If no ID found in text, try raw extraction
-        if (rawText) {
-            const rawResult = extractRawTextFromPdfBytes(new TextEncoder().encode(rawText));
-            if (rawResult.ids.length > 0) {
-                // Return the first valid ID
-                for (const id of rawResult.ids) {
-                    if (id.length >= 4) {
-                        console.log(`✅ Found ID from raw extraction: ${id}`);
-                        return id;
-                    }
-                }
-            }
-        }
-        
-        console.log(`❌ No ID found`);
-        return null;
     }
 
     // ============================================
@@ -584,17 +544,6 @@
                 }
             }
         }
-        
-        const fallbackMatch = text.match(/([A-Z]{2,}(?:\s+[A-Z]{2,}){1,5})/);
-        if (fallbackMatch) {
-            let name = fallbackMatch[1].trim();
-            const stopWords = ['BASIC', 'HRA', 'ALLOWANCE', 'BONUS', 'LWF', 'UAN', 'ESIC', 'P TAX', 'TOTAL', 'GROSS', 'AMOUNT', 'PARTICULARS', 'EARNING', 'DEDUCTIONS', 'FIXED', 'RATE', 'BANK', 'TRANSFER', 'EXEMPTED', 'LOCATION', 'NOIDA', 'KHASRA', 'NEAR', 'BSES', 'OFFICE', 'VILLAGE', 'POST', 'BHARTHAL', 'DWARKA', 'SECTOR', 'NEW', 'DELHI', 'SUPERVISOR', 'SHIFT', 'INCHARGE', 'TEAM', 'LEADER', 'PICKER', 'LOADER', 'UNLOADER', 'EXECUTIVE'];
-            if (stopWords.some(w => name.includes(w))) {
-                return null;
-            }
-            return name;
-        }
-        
         return null;
     }
 
@@ -1080,7 +1029,7 @@
     }
 
     // ============================================
-    // PROCESS DATA
+    // ⭐ PROCESS DATA - WITH FULL DEBUGGING
     // ============================================
 
     $('processDataBtn').addEventListener('click', async function() {
@@ -1094,6 +1043,11 @@
         progressFill.style.width = '0%';
         progressPercent.textContent = '0%';
         progressText.textContent = 'Starting...';
+        
+        totalIdsFound = 0;
+        uniqueIdsFound = 0;
+        const allFoundIds = [];
+        const pageIdMap = {};
 
         try {
             let csvEmployees = [];
@@ -1140,103 +1094,119 @@
                     const arrayBuffer = await pdfFile.arrayBuffer();
                     const pdfBytes = new Uint8Array(arrayBuffer);
                     
-                    // Store PDF bytes
                     pdfDataStore[pdfFile.name] = { 
                         bytes: pdfBytes.buffer, 
                         pages: 0 
                     };
 
-                    // Try to load PDF with pdf.js
-                    let pdf;
+                    // Try PDF.js extraction
                     let pageCount = 0;
-                    let pageTexts = [];
-                    let rawText = '';
+                    let pdfjsSuccess = false;
                     
                     try {
-                        pdf = await pdfjsLib.getDocument({ data: pdfBytes }).promise;
+                        const pdf = await pdfjsLib.getDocument({ data: pdfBytes }).promise;
                         pageCount = pdf.numPages;
                         pdfDataStore[pdfFile.name].pages = pageCount;
                         totalPages += pageCount;
+                        pdfjsSuccess = true;
                         
-                        progressText.textContent = `Scanning ${pdfFile.name} (${pageCount} pages)...`;
+                        progressText.textContent = `Scanning ${pdfFile.name} (${pageCount} pages) with PDF.js...`;
                         
                         for (let i = 1; i <= pageCount; i++) {
                             try {
                                 const page = await pdf.getPage(i);
                                 const textContent = await page.getTextContent();
                                 const pageText = textContent.items.map(item => item.str).join(' ');
-                                pageTexts.push(pageText);
                                 
-                                // If PDF.js extracted text, use it
-                                if (pageText && pageText.trim().length > 10) {
-                                    // Try to extract ID from the text
-                                    const empId = extractEmpId(pageText);
-                                    if (empId) {
-                                        const name = extractName(pageText) || `Employee ${i}`;
-                                        allPdfEmployees.push({
-                                            empId: empId,
-                                            name: name,
-                                            pageNumber: i,
-                                            pdfFile: pdfFile.name
-                                        });
-                                        console.log(`✅ Found ID: ${empId} on page ${i} of ${pdfFile.name}`);
+                                // Try to find ID using enhanced extraction
+                                const foundId = extractEmpIdFromText(pageText);
+                                
+                                if (foundId) {
+                                    const name = extractName(pageText) || `Employee ${i}`;
+                                    const empEntry = {
+                                        empId: foundId,
+                                        name: name,
+                                        pageNumber: i,
+                                        pdfFile: pdfFile.name
+                                    };
+                                    
+                                    // Check for duplicates on same page
+                                    const existing = allPdfEmployees.find(e => 
+                                        e.empId === foundId && e.pageNumber === i && e.pdfFile === pdfFile.name
+                                    );
+                                    if (!existing) {
+                                        allPdfEmployees.push(empEntry);
+                                        allFoundIds.push(foundId);
+                                        console.log(`✅ Found ID: ${foundId} on page ${i} (PDF.js)`);
                                     }
                                 } else {
-                                    // PDF.js couldn't extract text - use raw extraction
+                                    // Try raw extraction for this page
                                     const rawResult = extractRawTextFromPdfBytes(pdfBytes);
-                                    rawText = rawResult.rawText;
-                                    
-                                    if (rawResult.ids.length > 0) {
-                                        // Find the ID for this page using page boundary markers
-                                        // For each page, look for patterns in raw text
-                                        const pageMarker = `Page ${i}`;
-                                        const pageStart = rawText.indexOf(pageMarker);
-                                        const pageEnd = rawText.indexOf(`Page ${i + 1}`, pageStart);
-                                        const pageRaw = pageEnd > pageStart ? rawText.substring(pageStart, pageEnd) : rawText;
-                                        
-                                        // Look for Emp Code in this page's raw text
-                                        const idMatch = pageRaw.match(/Emp\s*Code\s*(\d{4,6})/i) || pageRaw.match(/(PPRR\d+)/i);
+                                    const rawIds = rawResult.ids;
+                                    if (rawIds.length > 0) {
+                                        // Find the right ID for this page
+                                        const pageRaw = rawResult.rawText;
+                                        const idMatch = pageRaw.match(/Emp\s*Code\s*(\d{4,6})/i) || 
+                                                       pageRaw.match(/(PPRR\d+)/i) ||
+                                                       pageRaw.match(/(TXIX\d+)/i) ||
+                                                       pageRaw.match(/(T1UB\d+)/i);
                                         if (idMatch) {
-                                            let id = idMatch[1] || idMatch[0];
-                                            id = id.trim().toUpperCase();
-                                            if (/^\d+$/.test(id) && id.length >= 4) {
-                                                id = `PPRR${id}`;
+                                            let rawId = idMatch[1] || idMatch[0];
+                                            rawId = rawId.trim().toUpperCase();
+                                            if (/^\d+$/.test(rawId) && rawId.length >= 4) {
+                                                rawId = `PPRR${rawId}`;
                                             }
-                                            const nameMatch = pageRaw.match(/Name\s+of\s+the\s+Employee\s*([A-Z\s]+?)(?=\s+No\s+of\s+Days|$)/i);
-                                            const name = nameMatch ? nameMatch[1].trim() : `Employee ${i}`;
-                                            
-                                            if (!allPdfEmployees.find(e => e.empId === id && e.pageNumber === i)) {
-                                                allPdfEmployees.push({
-                                                    empId: id,
-                                                    name: name.replace(/[^A-Za-z\s\.]/g, '').trim(),
+                                            rawId = rawId.replace(/[^A-Z0-9]/g, '');
+                                            if (rawId.length >= 4) {
+                                                const nameMatch = pageRaw.match(/Name\s+of\s+the\s+Employee\s*([A-Z\s]+?)(?=\s+No\s+of\s+Days|$)/i);
+                                                const rawName = nameMatch ? nameMatch[1].trim().replace(/[^A-Za-z\s\.]/g, '') : `Employee ${i}`;
+                                                const empEntry = {
+                                                    empId: rawId,
+                                                    name: rawName,
                                                     pageNumber: i,
                                                     pdfFile: pdfFile.name
-                                                });
-                                                console.log(`✅ Found ID from raw: ${id} on page ${i} of ${pdfFile.name}`);
+                                                };
+                                                const existing = allPdfEmployees.find(e => 
+                                                    e.empId === rawId && e.pageNumber === i && e.pdfFile === pdfFile.name
+                                                );
+                                                if (!existing) {
+                                                    allPdfEmployees.push(empEntry);
+                                                    allFoundIds.push(rawId);
+                                                    console.log(`✅ Found ID: ${rawId} on page ${i} (Raw fallback)`);
+                                                }
                                             }
                                         }
                                     }
                                 }
                             } catch (pageError) {
-                                console.log(`⚠️ Page ${i} extraction failed, trying raw...`);
-                                // Fallback to raw extraction for this page
+                                console.log(`⚠️ Page ${i} error:`, pageError.message);
+                                // Try raw extraction for this page
                                 const rawResult = extractRawTextFromPdfBytes(pdfBytes);
                                 const pageRaw = rawResult.rawText;
-                                const idMatch = pageRaw.match(/Emp\s*Code\s*(\d{4,6})/i) || pageRaw.match(/(PPRR\d+)/i);
+                                const idMatch = pageRaw.match(/Emp\s*Code\s*(\d{4,6})/i) || 
+                                               pageRaw.match(/(PPRR\d+)/i);
                                 if (idMatch) {
-                                    let id = idMatch[1] || idMatch[0];
-                                    id = id.trim().toUpperCase();
-                                    if (/^\d+$/.test(id) && id.length >= 4) {
-                                        id = `PPRR${id}`;
+                                    let rawId = idMatch[1] || idMatch[0];
+                                    rawId = rawId.trim().toUpperCase();
+                                    if (/^\d+$/.test(rawId) && rawId.length >= 4) {
+                                        rawId = `PPRR${rawId}`;
                                     }
-                                    if (!allPdfEmployees.find(e => e.empId === id && e.pageNumber === i)) {
-                                        allPdfEmployees.push({
-                                            empId: id,
+                                    rawId = rawId.replace(/[^A-Z0-9]/g, '');
+                                    if (rawId.length >= 4) {
+                                        const empEntry = {
+                                            empId: rawId,
                                             name: `Employee ${i}`,
                                             pageNumber: i,
                                             pdfFile: pdfFile.name
-                                        });
-                                        console.log(`✅ Found ID from raw fallback: ${id} on page ${i}`);
+                                        };
+                                        const existing = allPdfEmployees.find(e => 
+                                            e.empId === rawId && e.pageNumber === i && e.pdfFile === pdfFile.name
+                                        );
+                                        if (!existing) {
+                                            allPdfEmployees.push(empEntry);
+                                            allFoundIds.push(rawId);
+                                            console.log(`✅ Found ID: ${rawId} on page ${i} (Raw fallback after error)`);
+                                        }
                                     }
                                 }
                             }
@@ -1248,28 +1218,34 @@
                             progressText.textContent = `Scanning ${pdfFile.name} - Page ${i}/${pageCount}...`;
                         }
                     } catch (pdfError) {
-                        console.log(`⚠️ PDF.js failed for ${pdfFile.name}, using raw extraction...`);
-                        // If PDF.js completely fails, use raw extraction for the whole PDF
+                        console.log(`⚠️ PDF.js failed for ${pdfFile.name}, using full raw extraction...`);
+                        // Full raw extraction
                         const rawResult = extractRawTextFromPdfBytes(pdfBytes);
                         const ids = rawResult.ids;
                         const names = rawResult.names;
                         
-                        // We couldn't determine page numbers, so assign sequentially
-                        ids.forEach((id, index) => {
+                        // Deduplicate IDs
+                        const uniqueRawIds = [...new Set(ids)];
+                        uniqueRawIds.forEach((id, index) => {
                             const pageNum = index + 1;
                             const name = names[index] || `Employee ${pageNum}`;
-                            if (!allPdfEmployees.find(e => e.empId === id)) {
-                                allPdfEmployees.push({
-                                    empId: id,
-                                    name: name,
-                                    pageNumber: pageNum,
-                                    pdfFile: pdfFile.name
-                                });
-                                console.log(`✅ Found ID from raw extraction: ${id} on page ${pageNum}`);
+                            const empEntry = {
+                                empId: id,
+                                name: name,
+                                pageNumber: pageNum,
+                                pdfFile: pdfFile.name
+                            };
+                            const existing = allPdfEmployees.find(e => 
+                                e.empId === id && e.pageNumber === pageNum && e.pdfFile === pdfFile.name
+                            );
+                            if (!existing) {
+                                allPdfEmployees.push(empEntry);
+                                allFoundIds.push(id);
+                                console.log(`✅ Found ID: ${id} on page ${pageNum} (Full raw)`);
                             }
                         });
-                        pdfDataStore[pdfFile.name].pages = ids.length || 1;
-                        totalPages += ids.length || 1;
+                        pdfDataStore[pdfFile.name].pages = uniqueRawIds.length || 1;
+                        totalPages += uniqueRawIds.length || 1;
                     }
                 }
             }
@@ -1278,6 +1254,11 @@
             progressFill.style.width = '85%';
             progressPercent.textContent = '85%';
 
+            console.log(`📊 Total IDs found: ${allFoundIds.length}`);
+            console.log(`📊 Unique IDs found: ${[...new Set(allFoundIds)].length}`);
+            console.log(`📊 PDF Employees: ${allPdfEmployees.length}`);
+
+            // Merge data
             let mergedData = [];
             if (csvEmployees.length > 0) {
                 mergedData = csvEmployees.map(emp => {
@@ -1295,6 +1276,7 @@
                     };
                 });
                 
+                // Add PDF-only employees
                 allPdfEmployees.forEach(pdfEmp => {
                     const exists = mergedData.some(m => {
                         const mNumeric = m.empId.toUpperCase().replace(/^[A-Z]+/, '');
@@ -1336,7 +1318,7 @@
             progressText.textContent = '✅ Complete!';
             
             const pdfCount = Object.keys(pdfDataStore).length;
-            setAdminMsg(`✅ Successfully processed ${employeeData.length} employees with ${pdfCount} PDF(s). Test Mode: ${currentTestMode ? 'ON' : 'OFF'}`, 'success');
+            setAdminMsg(`✅ Successfully processed ${employeeData.length} employees with ${pdfCount} PDF(s). Found ${allFoundIds.length} IDs total.`, 'success');
 
             setTimeout(() => { progressContainer.style.display = 'none'; }, 2000);
             renderEmployeeList();
@@ -1495,13 +1477,6 @@ PPRR13081,SACHIN BAISOYA,sachin!88`;
                 syncTestModeFromServer();
             }
         }, 3000);
-    }
-
-    function stopTestModeSync() {
-        if (testModeSyncInterval) {
-            clearInterval(testModeSyncInterval);
-            testModeSyncInterval = null;
-        }
     }
 
     // ============================================

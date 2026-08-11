@@ -1,38 +1,35 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const { MongoClient } = require('mongodb');
+const { MongoClient, GridFSBucket } = require('mongodb');
 const multer = require('multer');
 const app = express();
 
 // Configuration
 const PORT = process.env.PORT || 3000;
-
-// Admin Password from Environment Variables
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
 
 // MongoDB Connection
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://trail_db_user:ZFjmUOMVSdatCOsq@cluster0.h1pqrer.mongodb.net/?retryWrites=true&w=majority';
 const DB_NAME = process.env.DB_NAME || 'payslip_system';
 const COLLECTION_NAME = 'payslip_data';
-const PDF_COLLECTION_NAME = 'payslip_pdfs';
 
 let db = null;
 let collection = null;
-let pdfCollection = null;
+let bucket = null;
 let dataCache = null;
 let employeeData = [];
 
 console.log('🚀 Starting server...');
 console.log('🔒 Admin password is set from environment variables');
 
-// Configure multer for PDF uploads - INCREASED LIMITS
+// Configure multer for PDF uploads
 const storage = multer.memoryStorage();
 const upload = multer({
     storage: storage,
     limits: {
-        fileSize: 100 * 1024 * 1024, // 100MB limit per file
-        files: 50 // Max 50 files
+        fileSize: 50 * 1024 * 1024, // 50MB per file
+        files: 50
     },
     fileFilter: (req, file, cb) => {
         if (file.mimetype === 'application/pdf') {
@@ -81,11 +78,10 @@ async function connectToMongoDB() {
         
         db = client.db(DB_NAME);
         collection = db.collection(COLLECTION_NAME);
-        pdfCollection = db.collection(PDF_COLLECTION_NAME);
+        bucket = new GridFSBucket(db, { bucketName: 'pdfs' });
         
         try {
             await collection.createIndex({ 'employees.empId': 1 });
-            await pdfCollection.createIndex({ _id: 1 });
             console.log('✅ Indexes created');
         } catch (e) {
             console.log('⚠️ Index may already exist:', e.message);
@@ -100,68 +96,118 @@ async function connectToMongoDB() {
 }
 
 // ============================================
-// PDF STORAGE FUNCTIONS
+// ⭐ GRIDFS PDF STORAGE FUNCTIONS
 // ============================================
 
-async function savePdfToMongoDB(filename, buffer, pages = 0) {
+async function savePdfToGridFS(filename, buffer) {
     try {
-        if (!pdfCollection) {
-            console.log('⚠️ No MongoDB connection, skipping PDF save');
+        if (!bucket) {
+            console.log('⚠️ No GridFS connection, skipping PDF save');
             return false;
         }
         
-        // Convert buffer to base64 for storage
-        const base64 = buffer.toString('base64');
-        
-        // Check size before saving
-        const sizeInMB = base64.length / (1024 * 1024);
-        if (sizeInMB > 15) {
-            console.log(`⚠️ PDF ${filename} is ${sizeInMB.toFixed(2)}MB, near 16MB limit`);
+        // Delete existing file if it exists
+        try {
+            const files = db.collection('pdfs.files');
+            await files.deleteOne({ filename: filename });
+        } catch(e) {
+            // Ignore if not found
         }
         
-        // Store each PDF as a separate document
-        await pdfCollection.updateOne(
-            { _id: filename },
-            { 
-                $set: { 
-                    bytes: base64,
-                    pages: pages || 0,
-                    size: buffer.length,
-                    lastUpdated: new Date().toISOString()
-                }
-            },
-            { upsert: true }
-        );
+        // Upload new file
+        const uploadStream = bucket.openUploadStream(filename);
+        const writeStream = uploadStream;
+        writeStream.write(buffer);
+        writeStream.end();
         
-        console.log(`✅ PDF saved: ${filename} (${(buffer.length/1024/1024).toFixed(2)} MB)`);
-        return true;
+        return new Promise((resolve, reject) => {
+            writeStream.on('finish', () => {
+                console.log(`✅ PDF saved to GridFS: ${filename} (${(buffer.length/1024/1024).toFixed(2)} MB)`);
+                resolve(true);
+            });
+            writeStream.on('error', (err) => {
+                console.error(`❌ Error saving PDF ${filename}:`, err);
+                reject(err);
+            });
+        });
     } catch (error) {
         console.error(`❌ Error saving PDF ${filename}:`, error.message);
         return false;
     }
 }
 
-async function loadAllPdfsFromMongoDB() {
+async function loadPdfFromGridFS(filename) {
     try {
-        if (!pdfCollection) return {};
-        const pdfs = await pdfCollection.find({}).toArray();
-        const result = {};
-        pdfs.forEach(pdf => {
-            try {
-                const buffer = Buffer.from(pdf.bytes, 'base64');
-                result[pdf._id] = {
+        if (!bucket) return null;
+        
+        // Check if file exists
+        const files = db.collection('pdfs.files');
+        const fileInfo = await files.findOne({ filename: filename });
+        if (!fileInfo) return null;
+        
+        const downloadStream = bucket.openDownloadStreamByName(filename);
+        const chunks = [];
+        
+        return new Promise((resolve, reject) => {
+            downloadStream.on('data', (chunk) => chunks.push(chunk));
+            downloadStream.on('end', () => {
+                const buffer = Buffer.concat(chunks);
+                resolve({
                     bytes: buffer.buffer,
-                    pages: pdf.pages || 0
-                };
-            } catch(e) {
-                console.error(`❌ Error parsing PDF ${pdf._id}:`, e.message);
-            }
+                    pages: 0,
+                    size: buffer.length
+                });
+            });
+            downloadStream.on('error', (err) => {
+                reject(err);
+            });
         });
-        console.log(`✅ Loaded ${Object.keys(result).length} PDFs from MongoDB`);
+    } catch (error) {
+        console.error(`❌ Error loading PDF ${filename}:`, error.message);
+        return null;
+    }
+}
+
+async function loadAllPdfsFromGridFS() {
+    try {
+        if (!bucket) return {};
+        const files = db.collection('pdfs.files');
+        const fileList = await files.find({}).toArray();
+        const result = {};
+        
+        for (const fileInfo of fileList) {
+            try {
+                const pdfData = await loadPdfFromGridFS(fileInfo.filename);
+                if (pdfData) {
+                    result[fileInfo.filename] = pdfData;
+                }
+            } catch(e) {
+                console.error(`❌ Error loading PDF ${fileInfo.filename}:`, e.message);
+            }
+        }
+        
+        console.log(`✅ Loaded ${Object.keys(result).length} PDFs from GridFS`);
         return result;
     } catch (error) {
         console.error('❌ Error loading PDFs:', error.message);
         return {};
+    }
+}
+
+async function deletePdfFromGridFS(filename) {
+    try {
+        if (!bucket) return false;
+        const files = db.collection('pdfs.files');
+        const fileInfo = await files.findOne({ filename: filename });
+        if (fileInfo) {
+            await bucket.delete(fileInfo._id);
+            console.log(`✅ PDF deleted: ${filename}`);
+            return true;
+        }
+        return false;
+    } catch (error) {
+        console.error(`❌ Error deleting PDF ${filename}:`, error.message);
+        return false;
     }
 }
 
@@ -219,7 +265,7 @@ async function saveDataToMongoDB(data) {
 
 async function initializeData() {
     let data = await loadDataFromMongoDB();
-    const pdfs = await loadAllPdfsFromMongoDB();
+    const pdfs = await loadAllPdfsFromGridFS();
     
     if (data) {
         if (!data.settings) data.settings = { testMode: false };
@@ -373,7 +419,7 @@ app.post('/api/admin/verify', (req, res) => {
 });
 
 // ============================================
-// ⭐ FIXED: PDF UPLOAD ENDPOINT WITH BETTER ERROR HANDLING
+// ⭐ GRIDFS PDF UPLOAD ENDPOINT
 // ============================================
 
 app.post('/api/upload-pdfs', upload.array('pdfs', 50), async (req, res) => {
@@ -386,24 +432,12 @@ app.post('/api/upload-pdfs', upload.array('pdfs', 50), async (req, res) => {
         let savedCount = 0;
         let errors = [];
         
-        // Parse metadata from the request
-        let metadata = {};
-        try {
-            if (req.body.metadata) {
-                metadata = JSON.parse(req.body.metadata);
-            }
-        } catch (e) {
-            console.log('⚠️ No metadata provided');
-        }
-        
         for (const file of req.files) {
             const filename = file.originalname;
-            const pages = metadata[filename] || 0;
-            
-            console.log(`📄 Saving PDF: ${filename} (${(file.size/1024/1024).toFixed(2)} MB)`);
+            console.log(`📄 Saving PDF to GridFS: ${filename} (${(file.size/1024/1024).toFixed(2)} MB)`);
             
             try {
-                const saved = await savePdfToMongoDB(filename, file.buffer, pages);
+                const saved = await savePdfToGridFS(filename, file.buffer);
                 if (saved) {
                     savedCount++;
                 } else {
@@ -415,7 +449,6 @@ app.post('/api/upload-pdfs', upload.array('pdfs', 50), async (req, res) => {
             }
         }
         
-        // Even if some PDFs fail, return success for those that worked
         if (savedCount > 0) {
             res.json({
                 success: true,
@@ -434,8 +467,7 @@ app.post('/api/upload-pdfs', upload.array('pdfs', 50), async (req, res) => {
     } catch (error) {
         console.error('❌ PDF upload error:', error);
         res.status(500).json({ 
-            error: 'PDF upload failed: ' + error.message,
-            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+            error: 'PDF upload failed: ' + error.message
         });
     }
 });
@@ -486,7 +518,7 @@ app.post('/api/track-download', async (req, res) => {
 app.get('/api/missing-payslips', async (req, res) => {
     try {
         const data = await loadDataFromMongoDB();
-        const pdfs = await loadAllPdfsFromMongoDB();
+        const pdfs = await loadAllPdfsFromGridFS();
         
         if (!data || !data.employees) {
             return res.json({ employees: [], pdfs: [] });
@@ -535,7 +567,7 @@ app.get('/api/data', async (req, res) => {
     try {
         const data = await loadDataFromMongoDB();
         if (data) {
-            const pdfs = await loadAllPdfsFromMongoDB();
+            const pdfs = await loadAllPdfsFromGridFS();
             data.pdfs = pdfs;
             dataCache = data;
             employeeData = data.employees || [];
@@ -580,7 +612,7 @@ app.post('/api/data', async (req, res) => {
 app.get('/health', async (req, res) => {
     try {
         const data = await loadDataFromMongoDB();
-        const pdfs = await loadAllPdfsFromMongoDB();
+        const pdfs = await loadAllPdfsFromGridFS();
         const mongodbConnected = !!collection;
         res.json({
             status: 'OK',
@@ -588,7 +620,7 @@ app.get('/health', async (req, res) => {
             recordCount: data ? data.employees.length : 0,
             pdfCount: Object.keys(pdfs).length,
             testMode: data ? data.settings?.testMode : false,
-            storageType: mongodbConnected ? 'MongoDB Atlas (Free Tier) ✅' : 'Local (ephemeral) ⚠️',
+            storageType: mongodbConnected ? 'MongoDB Atlas (Free) ✅' : 'Local (ephemeral) ⚠️',
             mongodbConnected: mongodbConnected,
             dataExists: !!data
         });

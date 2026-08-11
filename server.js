@@ -1,638 +1,244 @@
 const express = require('express');
-const fs = require('fs');
 const path = require('path');
-const { MongoClient, GridFSBucket } = require('mongodb');
+const { MongoClient } = require('mongodb');
 const multer = require('multer');
 const app = express();
 
-// Configuration
 const PORT = process.env.PORT || 3000;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
 
-// MongoDB Connection
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://trail_db_user:ZFjmUOMVSdatCOsq@cluster0.h1pqrer.mongodb.net/?retryWrites=true&w=majority';
 const DB_NAME = process.env.DB_NAME || 'payslip_system';
-const COLLECTION_NAME = 'payslip_data';
 
 let db = null;
 let collection = null;
-let bucket = null;
-let dataCache = null;
+let pdfCollection = null;
 let employeeData = [];
 
 console.log('🚀 Starting server...');
-console.log('🔒 Admin password is set from environment variables');
 
-// Configure multer for PDF uploads
 const storage = multer.memoryStorage();
 const upload = multer({
     storage: storage,
-    limits: {
-        fileSize: 50 * 1024 * 1024, // 50MB per file
-        files: 50
-    },
-    fileFilter: (req, file, cb) => {
-        if (file.mimetype === 'application/pdf') {
-            cb(null, true);
-        } else {
-            cb(new Error('Only PDF files are allowed'), false);
-        }
-    }
+    limits: { fileSize: 20 * 1024 * 1024 } // 20MB limit
 });
 
-// ============================================
-// MIDDLEWARE
-// ============================================
-
-app.use(express.json({ limit: '500mb' }));
-app.use(express.urlencoded({ extended: true, limit: '500mb' }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, DELETE');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    if (req.method === 'OPTIONS') {
-        return res.sendStatus(200);
-    }
+    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type');
+    if (req.method === 'OPTIONS') return res.sendStatus(200);
     next();
 });
 
 app.use(express.static('public'));
 
 // ============================================
-// MONGODB CONNECTION
+// MongoDB Connection
 // ============================================
 
 async function connectToMongoDB() {
     try {
-        console.log('📡 Connecting to MongoDB Atlas...');
+        console.log('📡 Connecting to MongoDB...');
         const client = new MongoClient(MONGODB_URI, {
             useNewUrlParser: true,
             useUnifiedTopology: true,
-            serverSelectionTimeoutMS: 10000,
-            socketTimeoutMS: 45000,
+            serverSelectionTimeoutMS: 5000,
         });
-        
         await client.connect();
-        console.log('✅ Connected to MongoDB Atlas successfully!');
-        
         db = client.db(DB_NAME);
-        collection = db.collection(COLLECTION_NAME);
-        bucket = new GridFSBucket(db, { bucketName: 'pdfs' });
-        
-        try {
-            await collection.createIndex({ 'employees.empId': 1 });
-            console.log('✅ Indexes created');
-        } catch (e) {
-            console.log('⚠️ Index may already exist:', e.message);
-        }
-        
+        collection = db.collection('payslip_data');
+        pdfCollection = db.collection('payslip_pdfs');
+        console.log('✅ MongoDB connected');
         return true;
     } catch (error) {
         console.error('❌ MongoDB connection failed:', error.message);
-        console.log('⚠️ Running with local storage only');
         return false;
     }
 }
 
 // ============================================
-// ⭐ GRIDFS PDF STORAGE FUNCTIONS
+// Load/Save Data
 // ============================================
 
-async function savePdfToGridFS(filename, buffer) {
+async function loadData() {
     try {
-        if (!bucket) {
-            console.log('⚠️ No GridFS connection, skipping PDF save');
-            return false;
-        }
-        
-        // Delete existing file if it exists
-        try {
-            const files = db.collection('pdfs.files');
-            await files.deleteOne({ filename: filename });
-        } catch(e) {
-            // Ignore if not found
-        }
-        
-        // Upload new file
-        const uploadStream = bucket.openUploadStream(filename);
-        const writeStream = uploadStream;
-        writeStream.write(buffer);
-        writeStream.end();
-        
-        return new Promise((resolve, reject) => {
-            writeStream.on('finish', () => {
-                console.log(`✅ PDF saved to GridFS: ${filename} (${(buffer.length/1024/1024).toFixed(2)} MB)`);
-                resolve(true);
-            });
-            writeStream.on('error', (err) => {
-                console.error(`❌ Error saving PDF ${filename}:`, err);
-                reject(err);
-            });
-        });
-    } catch (error) {
-        console.error(`❌ Error saving PDF ${filename}:`, error.message);
-        return false;
-    }
-}
-
-async function loadPdfFromGridFS(filename) {
-    try {
-        if (!bucket) return null;
-        
-        // Check if file exists
-        const files = db.collection('pdfs.files');
-        const fileInfo = await files.findOne({ filename: filename });
-        if (!fileInfo) return null;
-        
-        const downloadStream = bucket.openDownloadStreamByName(filename);
-        const chunks = [];
-        
-        return new Promise((resolve, reject) => {
-            downloadStream.on('data', (chunk) => chunks.push(chunk));
-            downloadStream.on('end', () => {
-                const buffer = Buffer.concat(chunks);
-                resolve({
-                    bytes: buffer.buffer,
-                    pages: 0,
-                    size: buffer.length
-                });
-            });
-            downloadStream.on('error', (err) => {
-                reject(err);
-            });
-        });
-    } catch (error) {
-        console.error(`❌ Error loading PDF ${filename}:`, error.message);
-        return null;
-    }
-}
-
-async function loadAllPdfsFromGridFS() {
-    try {
-        if (!bucket) return {};
-        const files = db.collection('pdfs.files');
-        const fileList = await files.find({}).toArray();
-        const result = {};
-        
-        for (const fileInfo of fileList) {
-            try {
-                const pdfData = await loadPdfFromGridFS(fileInfo.filename);
-                if (pdfData) {
-                    result[fileInfo.filename] = pdfData;
-                }
-            } catch(e) {
-                console.error(`❌ Error loading PDF ${fileInfo.filename}:`, e.message);
-            }
-        }
-        
-        console.log(`✅ Loaded ${Object.keys(result).length} PDFs from GridFS`);
-        return result;
-    } catch (error) {
-        console.error('❌ Error loading PDFs:', error.message);
-        return {};
-    }
-}
-
-async function deletePdfFromGridFS(filename) {
-    try {
-        if (!bucket) return false;
-        const files = db.collection('pdfs.files');
-        const fileInfo = await files.findOne({ filename: filename });
-        if (fileInfo) {
-            await bucket.delete(fileInfo._id);
-            console.log(`✅ PDF deleted: ${filename}`);
-            return true;
-        }
-        return false;
-    } catch (error) {
-        console.error(`❌ Error deleting PDF ${filename}:`, error.message);
-        return false;
-    }
-}
-
-// ============================================
-// DATA OPERATIONS
-// ============================================
-
-async function loadDataFromMongoDB() {
-    try {
-        if (!collection) return null;
         const data = await collection.findOne({ _id: 'payslip_data' });
         if (data) {
             delete data._id;
             employeeData = data.employees || [];
-            console.log(`✅ Data loaded from MongoDB: ${employeeData.length} employees`);
             return data;
         }
         return null;
-    } catch (error) {
-        console.error('❌ Error loading from MongoDB:', error);
+    } catch (e) {
+        console.error('❌ Load error:', e.message);
         return null;
     }
 }
 
-async function saveDataToMongoDB(data) {
+async function saveData(data) {
     try {
-        if (!collection) {
-            console.log('⚠️ No MongoDB connection, saving to local cache only');
-            dataCache = data;
-            employeeData = data.employees || [];
-            return false;
-        }
-        
-        const employeeDataToSave = {
-            employees: data.employees || [],
-            settings: data.settings || { testMode: false },
-            lastUpdated: new Date().toISOString()
-        };
-        
         await collection.updateOne(
             { _id: 'payslip_data' },
-            { $set: employeeDataToSave },
+            { 
+                $set: { 
+                    employees: data.employees || [],
+                    settings: data.settings || { testMode: false },
+                    lastUpdated: new Date().toISOString()
+                }
+            },
             { upsert: true }
         );
-        
         employeeData = data.employees || [];
-        console.log(`✅ Data saved to MongoDB: ${employeeData.length} employees`);
-        dataCache = data;
         return true;
-    } catch (error) {
-        console.error('❌ Error saving to MongoDB:', error);
+    } catch (e) {
+        console.error('❌ Save error:', e.message);
         return false;
     }
 }
 
-async function initializeData() {
-    let data = await loadDataFromMongoDB();
-    const pdfs = await loadAllPdfsFromGridFS();
-    
-    if (data) {
-        if (!data.settings) data.settings = { testMode: false };
-        if (!data.employees) data.employees = [];
-        data.pdfs = pdfs;
-        dataCache = data;
-        employeeData = data.employees || [];
-        console.log(`✅ Data initialized: ${employeeData.length} employees, ${Object.keys(pdfs).length} PDFs`);
-        return data;
-    }
-    
-    const initialData = {
-        employees: [],
-        pdfs: pdfs,
-        settings: { testMode: false },
-        lastUpdated: new Date().toISOString()
-    };
-    
-    await saveDataToMongoDB(initialData);
-    dataCache = initialData;
-    employeeData = [];
-    console.log('✅ Created new data document in MongoDB');
-    return initialData;
-}
-
 // ============================================
-// EXTRACTION FUNCTIONS
+// PDF Upload (Single file - more reliable)
 // ============================================
 
-function extractEmpId(text) {
-    const patterns = [
-        /Emp\s*Code[:.\s]*([0-9]{4,6})/i,
-        /Emp\s*Code[:.\s]*(PPRR[0-9]+)/i,
-        /Emp\s*Code[:.\s]*(TXIX[0-9]+)/i,
-        /Emp\s*Code[:.\s]*(T1UB[0-9]+)/i,
-        /Employee\s*Code[:.\s]*([0-9]{4,6})/i,
-        /PPRR([0-9]+)/i,
-        /TXIX([0-9]+)/i,
-        /T1UB([0-9]+)/i,
-        /\b([0-9]{4,6})\b/
-    ];
-    
-    for (const pattern of patterns) {
-        const match = text.match(pattern);
-        if (match) {
-            let id = match[1] ? match[1].trim() : match[0].trim();
-            id = id.replace(/[^A-Z0-9]/g, '');
-            if (id.length >= 4 && id.length <= 8) {
-                return id;
-            }
+app.post('/api/upload-pdf', upload.single('pdfs'), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ error: 'No file uploaded' });
         }
-    }
-    return null;
-}
-
-function extractName(text) {
-    const patterns = [
-        /Name of the Employee[:.\s]*([A-Z\s]+?)(?=\s+No of Days|\s+Emp Code|\s+Aadhaar|\s+Designation|\s+UAN|\s+ESIC|\s+Dated|$)/i,
-        /Employee Name[:.\s]*([A-Z\s]+?)(?=\s+No of Days|\s+Emp Code|\s+Aadhaar|\s+Designation|\s+UAN|\s+ESIC|\s+Dated|$)/i,
-        /Name[:.\s]*([A-Z\s]+?)(?=\s+No of Days|\s+Emp Code|\s+Aadhaar|\s+Designation|\s+UAN|\s+ESIC|\s+Dated|$)/i,
-        /Name\s+([A-Z]{2,}(?:\s+[A-Z]{2,})*)/i,
-    ];
-    
-    for (const pattern of patterns) {
-        const match = text.match(pattern);
-        if (match) {
-            let name = match[1].trim();
-            name = name.replace(/\s+No of Days.*$/i, '')
-                       .replace(/\s+Emp Code.*$/i, '')
-                       .replace(/\s+Aadhaar.*$/i, '')
-                       .replace(/\s+Designation.*$/i, '')
-                       .replace(/\s+UAN.*$/i, '')
-                       .replace(/\s+ESIC.*$/i, '')
-                       .replace(/\s+Dated.*$/i, '')
-                       .replace(/\s+Location.*$/i, '')
-                       .replace(/\s+Pay-mode.*$/i, '');
-            name = name.replace(/[^A-Za-z\s\.]/g, '');
-            if (name.length > 1) {
-                return name.trim();
-            }
+        
+        const filename = req.file.originalname;
+        console.log(`📄 Saving: ${filename} (${(req.file.size/1024/1024).toFixed(2)} MB)`);
+        
+        // Check if file is too large
+        if (req.file.size > 15 * 1024 * 1024) {
+            console.warn(`⚠️ ${filename} is ${(req.file.size/1024/1024).toFixed(2)} MB, may exceed MongoDB limit`);
         }
+        
+        const base64 = req.file.buffer.toString('base64');
+        
+        await pdfCollection.updateOne(
+            { _id: filename },
+            { $set: { bytes: base64, size: req.file.size, lastUpdated: new Date().toISOString() } },
+            { upsert: true }
+        );
+        
+        res.json({ success: true, message: 'PDF uploaded', filename: filename });
+    } catch (error) {
+        console.error('❌ Upload error:', error.message);
+        res.status(500).json({ error: error.message });
     }
-    return null;
-}
-
-function findEmployee(empId) {
-    if (!empId) return null;
-    empId = empId.toUpperCase().trim();
-    
-    let found = employeeData.find(e => e.empId.toUpperCase() === empId);
-    if (found) return found;
-    
-    const numericPart = empId.replace(/^[A-Z]+/, '');
-    if (numericPart && numericPart.length >= 4) {
-        found = employeeData.find(e => {
-            const eNumeric = e.empId.toUpperCase().replace(/^[A-Z]+/, '');
-            return eNumeric === numericPart;
-        });
-        if (found) return found;
-    }
-    return null;
-}
+});
 
 // ============================================
-// ADMIN AUTHENTICATION
+// Admin Login
 // ============================================
 
 app.post('/api/admin/login', (req, res) => {
-    try {
-        const password = req.body && req.body.password ? req.body.password : null;
-        if (!password) {
-            return res.status(400).json({ success: false, message: 'Password is required' });
-        }
-        if (password === ADMIN_PASSWORD) {
-            const expiry = Date.now() + (24 * 60 * 60 * 1000);
-            const tokenData = `${expiry}:${password}`;
-            const token = Buffer.from(tokenData).toString('base64');
-            res.json({ success: true, token: token, message: 'Login successful', expiresIn: '24 hours' });
-        } else {
-            res.status(401).json({ success: false, message: 'Invalid password' });
-        }
-    } catch (error) {
-        console.error('❌ Login error:', error);
-        res.status(500).json({ success: false, message: 'Server error: ' + error.message });
+    const password = req.body?.password || '';
+    if (password === ADMIN_PASSWORD) {
+        const token = Buffer.from(`${Date.now()}:${password}`).toString('base64');
+        res.json({ success: true, token: token });
+    } else {
+        res.status(401).json({ success: false, message: 'Invalid password' });
     }
 });
 
 app.post('/api/admin/verify', (req, res) => {
+    const token = req.body?.token || '';
     try {
-        const token = req.body && req.body.token ? req.body.token : null;
-        if (!token) {
-            return res.json({ success: false, message: 'No token provided' });
+        const decoded = Buffer.from(token, 'base64').toString();
+        const [, password] = decoded.split(':');
+        if (password === ADMIN_PASSWORD) {
+            return res.json({ success: true });
         }
-        try {
-            const decoded = Buffer.from(token, 'base64').toString();
-            const [expiry, password] = decoded.split(':');
-            if (Date.now() > parseInt(expiry)) {
-                return res.json({ success: false, message: 'Token expired' });
-            }
-            if (password === ADMIN_PASSWORD) {
-                return res.json({ success: true, message: 'Token valid' });
-            }
-        } catch (e) {
-            return res.json({ success: false, message: 'Invalid token' });
-        }
-        res.json({ success: false, message: 'Invalid token' });
-    } catch (error) {
-        console.error('❌ Verify error:', error);
-        res.json({ success: false, message: 'Server error' });
-    }
+    } catch (e) {}
+    res.json({ success: false });
 });
 
 // ============================================
-// ⭐ GRIDFS PDF UPLOAD ENDPOINT
-// ============================================
-
-app.post('/api/upload-pdfs', upload.array('pdfs', 50), async (req, res) => {
-    try {
-        if (!req.files || req.files.length === 0) {
-            return res.status(400).json({ error: 'No PDF files uploaded' });
-        }
-        
-        console.log(`📤 Received ${req.files.length} PDF files for upload`);
-        let savedCount = 0;
-        let errors = [];
-        
-        for (const file of req.files) {
-            const filename = file.originalname;
-            console.log(`📄 Saving PDF to GridFS: ${filename} (${(file.size/1024/1024).toFixed(2)} MB)`);
-            
-            try {
-                const saved = await savePdfToGridFS(filename, file.buffer);
-                if (saved) {
-                    savedCount++;
-                } else {
-                    errors.push(`Failed to save ${filename}`);
-                }
-            } catch (err) {
-                console.error(`❌ Error saving ${filename}:`, err.message);
-                errors.push(`${filename}: ${err.message}`);
-            }
-        }
-        
-        if (savedCount > 0) {
-            res.json({
-                success: true,
-                message: `${savedCount} of ${req.files.length} PDF(s) uploaded successfully`,
-                uploaded: savedCount,
-                total: req.files.length,
-                errors: errors.length > 0 ? errors : undefined
-            });
-        } else {
-            res.status(500).json({
-                success: false,
-                error: 'Failed to upload any PDFs',
-                details: errors
-            });
-        }
-    } catch (error) {
-        console.error('❌ PDF upload error:', error);
-        res.status(500).json({ 
-            error: 'PDF upload failed: ' + error.message
-        });
-    }
-});
-
-// ============================================
-// DOWNLOAD TRACKING
-// ============================================
-
-app.post('/api/track-download', async (req, res) => {
-    try {
-        const { empId } = req.body;
-        if (!empId) {
-            return res.status(400).json({ error: 'Employee ID required' });
-        }
-        
-        const data = await loadDataFromMongoDB();
-        if (!data || !data.employees) {
-            return res.status(404).json({ error: 'No data found' });
-        }
-        
-        const employee = data.employees.find(e => e.empId === empId || 
-            e.empId.replace(/^[A-Z]+/, '') === empId.replace(/^[A-Z]+/, ''));
-        
-        if (!employee) {
-            return res.status(404).json({ error: 'Employee not found' });
-        }
-        
-        employee.downloadCount = (employee.downloadCount || 0) + 1;
-        employee.lastDownload = new Date().toISOString();
-        
-        await saveDataToMongoDB(data);
-        
-        res.json({ 
-            success: true, 
-            downloadCount: employee.downloadCount,
-            lastDownload: employee.lastDownload
-        });
-    } catch (error) {
-        console.error('❌ Track download error:', error);
-        res.status(500).json({ error: 'Server error' });
-    }
-});
-
-// ============================================
-// MISSING PAYSLIPS LOG
-// ============================================
-
-app.get('/api/missing-payslips', async (req, res) => {
-    try {
-        const data = await loadDataFromMongoDB();
-        const pdfs = await loadAllPdfsFromGridFS();
-        
-        if (!data || !data.employees) {
-            return res.json({ employees: [], pdfs: [] });
-        }
-        
-        const pdfFiles = Object.keys(pdfs);
-        
-        const pdfStats = pdfFiles.map(pdfName => {
-            const foundInPdf = data.employees.filter(emp => 
-                emp.pdfFile === pdfName && emp.pageNumber
-            );
-            
-            return {
-                pdfName: pdfName,
-                found: foundInPdf.length,
-                missing: data.employees.length - foundInPdf.length
-            };
-        });
-        
-        const missingEmployees = data.employees.filter(emp => {
-            return !emp.pageNumber || !emp.pdfFile || !pdfFiles.includes(emp.pdfFile);
-        });
-        
-        res.json({
-            totalEmployees: data.employees.length,
-            totalWithPayslip: data.employees.filter(e => e.pageNumber && e.pdfFile && pdfFiles.includes(e.pdfFile)).length,
-            pdfStats: pdfStats,
-            missingEmployees: missingEmployees.map(e => ({
-                empId: e.empId,
-                name: e.name,
-                pageNumber: e.pageNumber || 'Not found',
-                pdfFile: e.pdfFile || 'Not assigned'
-            }))
-        });
-    } catch (error) {
-        console.error('❌ Missing payslips error:', error);
-        res.status(500).json({ error: 'Server error' });
-    }
-});
-
-// ============================================
-// API ROUTES
+// API Routes
 // ============================================
 
 app.get('/api/data', async (req, res) => {
     try {
-        const data = await loadDataFromMongoDB();
+        const data = await loadData();
+        const pdfs = await pdfCollection.find({}).toArray();
+        const pdfMap = {};
+        pdfs.forEach(p => { pdfMap[p._id] = { bytes: p.bytes, pages: 0 }; });
+        
         if (data) {
-            const pdfs = await loadAllPdfsFromGridFS();
-            data.pdfs = pdfs;
-            dataCache = data;
-            employeeData = data.employees || [];
+            data.pdfs = pdfMap;
             res.json(data);
         } else {
-            res.json(dataCache || { employees: [], pdfs: {}, settings: { testMode: false } });
+            res.json({ employees: [], pdfs: pdfMap, settings: { testMode: false } });
         }
-    } catch (error) {
-        console.error('❌ Error reading data:', error);
-        res.json(dataCache || { employees: [], pdfs: {}, settings: { testMode: false } });
+    } catch (e) {
+        res.json({ employees: [], pdfs: {}, settings: { testMode: false } });
     }
 });
 
 app.post('/api/data', async (req, res) => {
     try {
         const data = req.body;
-        if (!data || typeof data !== 'object') {
-            return res.status(400).json({ error: 'Invalid data format' });
-        }
-        
         if (!data.employees) data.employees = [];
         if (!data.settings) data.settings = { testMode: false };
-        
-        const saved = await saveDataToMongoDB(data);
-        if (saved) {
-            dataCache = data;
-            employeeData = data.employees || [];
-            res.json({ 
-                success: true, 
-                message: 'Employee data saved successfully',
-                lastUpdated: data.lastUpdated
-            });
-        } else {
-            res.status(500).json({ error: 'Failed to save data to MongoDB' });
-        }
-    } catch (error) {
-        console.error('❌ Error saving data:', error);
-        res.status(500).json({ error: 'Error saving data' });
+        await saveData(data);
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
     }
 });
 
-app.get('/health', async (req, res) => {
+app.post('/api/track-download', async (req, res) => {
     try {
-        const data = await loadDataFromMongoDB();
-        const pdfs = await loadAllPdfsFromGridFS();
-        const mongodbConnected = !!collection;
-        res.json({
-            status: 'OK',
-            timestamp: new Date().toISOString(),
-            recordCount: data ? data.employees.length : 0,
-            pdfCount: Object.keys(pdfs).length,
-            testMode: data ? data.settings?.testMode : false,
-            storageType: mongodbConnected ? 'MongoDB Atlas (Free) ✅' : 'Local (ephemeral) ⚠️',
-            mongodbConnected: mongodbConnected,
-            dataExists: !!data
-        });
-    } catch (error) {
-        res.json({
-            status: 'OK',
-            timestamp: new Date().toISOString(),
-            storageType: 'MongoDB Atlas',
-            error: error.message,
-            mongodbConnected: false
-        });
+        const { empId } = req.body;
+        const data = await loadData();
+        const emp = data.employees.find(e => e.empId === empId);
+        if (emp) {
+            emp.downloadCount = (emp.downloadCount || 0) + 1;
+            await saveData(data);
+            res.json({ success: true, downloadCount: emp.downloadCount });
+        } else {
+            res.status(404).json({ error: 'Employee not found' });
+        }
+    } catch (e) {
+        res.status(500).json({ error: e.message });
     }
+});
+
+app.get('/api/missing-payslips', async (req, res) => {
+    try {
+        const data = await loadData();
+        const pdfs = await pdfCollection.find({}).toArray();
+        const pdfFiles = pdfs.map(p => p._id);
+        
+        const missing = (data?.employees || []).filter(e => 
+            !e.pageNumber || !e.pdfFile || !pdfFiles.includes(e.pdfFile)
+        );
+        
+        res.json({
+            totalEmployees: data?.employees?.length || 0,
+            totalWithPayslip: (data?.employees || []).filter(e => 
+                e.pageNumber && e.pdfFile && pdfFiles.includes(e.pdfFile)
+            ).length,
+            pdfStats: pdfFiles.map(name => ({ 
+                pdfName: name, 
+                found: (data?.employees || []).filter(e => e.pdfFile === name && e.pageNumber).length,
+                missing: (data?.employees || []).length - (data?.employees || []).filter(e => e.pdfFile === name && e.pageNumber).length
+            })),
+            missingEmployees: missing.map(e => ({ empId: e.empId, name: e.name, pageNumber: e.pageNumber || 'Not found', pdfFile: e.pdfFile || 'Not assigned' }))
+        });
+    } catch (e) {
+        res.json({ totalEmployees: 0, totalWithPayslip: 0, pdfStats: [], missingEmployees: [] });
+    }
+});
+
+app.get('/health', (req, res) => {
+    res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
 app.get('/', (req, res) => {
@@ -643,44 +249,17 @@ app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-app.use((err, req, res, next) => {
-    console.error('❌ Server error:', err);
-    res.status(500).json({ error: 'Internal server error' });
-});
-
-// Graceful shutdown
-process.on('SIGTERM', async () => {
-    console.log('🔄 Received SIGTERM, saving data...');
-    if (dataCache) {
-        await saveDataToMongoDB(dataCache);
-    }
-    process.exit(0);
-});
-
-process.on('SIGINT', async () => {
-    console.log('🔄 Received SIGINT, saving data...');
-    if (dataCache) {
-        await saveDataToMongoDB(dataCache);
-    }
-    process.exit(0);
-});
-
 // ============================================
-// START SERVER
+// Start
 // ============================================
 
-async function startServer() {
-    const connected = await connectToMongoDB();
-    await initializeData();
-    
+async function start() {
+    await connectToMongoDB();
+    await loadData();
     app.listen(PORT, '0.0.0.0', () => {
         console.log(`✅ Server running on port ${PORT}`);
         console.log(`📊 Employees: ${employeeData.length}`);
-        console.log(`📄 PDFs: ${dataCache.pdfs ? Object.keys(dataCache.pdfs).length : 0}`);
-        console.log(`🔒 Test Mode: ${dataCache.settings?.testMode ? 'ON' : 'OFF'}`);
-        console.log(`💾 Storage: ${connected ? 'MongoDB Atlas (Free) ✅' : 'Local (ephemeral) ⚠️'}`);
-        console.log(`🌐 URL: http://localhost:${PORT}`);
     });
 }
 
-startServer();
+start();

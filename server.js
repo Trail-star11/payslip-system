@@ -22,6 +22,7 @@ let collection = null;
 let pdfCollection = null;
 let dataCache = null;
 let employeeData = [];
+let adminSessions = {};
 
 console.log('🚀 Starting server...');
 console.log('🔒 Admin password is set from environment variables');
@@ -53,7 +54,7 @@ app.use(express.urlencoded({ extended: true, limit: '500mb' }));
 app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
     res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, DELETE');
-    res.header('Access-Control-Allow-Headers', 'Content-Type');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     if (req.method === 'OPTIONS') {
         return res.sendStatus(200);
     }
@@ -376,7 +377,7 @@ function findEmployee(empId) {
 }
 
 // ============================================
-// ADMIN AUTHENTICATION
+// ⭐ FIXED: ADMIN AUTHENTICATION
 // ============================================
 
 app.post('/api/admin/login', (req, res) => {
@@ -386,10 +387,18 @@ app.post('/api/admin/login', (req, res) => {
             return res.status(400).json({ success: false, message: 'Password is required' });
         }
         if (password === ADMIN_PASSWORD) {
-            const expiry = Date.now() + (24 * 60 * 60 * 1000);
-            const tokenData = `${expiry}:${password}`;
-            const token = Buffer.from(tokenData).toString('base64');
-            res.json({ success: true, token: token, message: 'Login successful', expiresIn: '24 hours' });
+            // Generate a simple session token
+            const token = Buffer.from(`${Date.now()}:${password}`).toString('base64');
+            adminSessions[token] = { 
+                createdAt: Date.now(),
+                expiresAt: Date.now() + (24 * 60 * 60 * 1000)
+            };
+            res.json({ 
+                success: true, 
+                token: token, 
+                message: 'Login successful', 
+                expiresIn: '24 hours' 
+            });
         } else {
             res.status(401).json({ success: false, message: 'Invalid password' });
         }
@@ -405,18 +414,32 @@ app.post('/api/admin/verify', (req, res) => {
         if (!token) {
             return res.json({ success: false, message: 'No token provided' });
         }
+        
+        // Check if token exists in sessions
+        const session = adminSessions[token];
+        if (!session) {
+            return res.json({ success: false, message: 'Invalid or expired session' });
+        }
+        
+        // Check if token is expired
+        if (Date.now() > session.expiresAt) {
+            delete adminSessions[token];
+            return res.json({ success: false, message: 'Token expired' });
+        }
+        
+        // Verify the password from token
         try {
             const decoded = Buffer.from(token, 'base64').toString();
-            const [expiry, password] = decoded.split(':');
-            if (Date.now() > parseInt(expiry)) {
-                return res.json({ success: false, message: 'Token expired' });
-            }
+            const [, password] = decoded.split(':');
             if (password === ADMIN_PASSWORD) {
+                // Refresh session expiry
+                session.expiresAt = Date.now() + (24 * 60 * 60 * 1000);
                 return res.json({ success: true, message: 'Token valid' });
             }
         } catch (e) {
-            return res.json({ success: false, message: 'Invalid token' });
+            return res.json({ success: false, message: 'Invalid token format' });
         }
+        
         res.json({ success: false, message: 'Invalid token' });
     } catch (error) {
         console.error('❌ Verify error:', error);
@@ -425,7 +448,7 @@ app.post('/api/admin/verify', (req, res) => {
 });
 
 // ============================================
-// PDF UPLOAD ENDPOINT (NEW - SPLIT UPLOAD)
+// PDF UPLOAD ENDPOINT
 // ============================================
 
 app.post('/api/upload-pdfs', upload.array('pdfs', 50), async (req, res) => {
@@ -597,7 +620,6 @@ app.post('/api/data', async (req, res) => {
         }
         
         if (!data.employees) data.employees = [];
-        if (!data.pdfs) data.pdfs = {};
         if (!data.settings) data.settings = { testMode: false };
         
         // Save employee data only (PDFs are uploaded separately)

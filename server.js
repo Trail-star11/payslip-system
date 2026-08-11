@@ -22,18 +22,17 @@ let collection = null;
 let pdfCollection = null;
 let dataCache = null;
 let employeeData = [];
-let adminSessions = {};
 
 console.log('🚀 Starting server...');
 console.log('🔒 Admin password is set from environment variables');
 
-// Configure multer for PDF uploads (memory storage for binary data)
+// Configure multer for PDF uploads
 const storage = multer.memoryStorage();
 const upload = multer({
     storage: storage,
     limits: {
-        fileSize: 50 * 1024 * 1024, // 50MB limit per file
-        files: 50 // Max 50 files
+        fileSize: 50 * 1024 * 1024,
+        files: 50
     },
     fileFilter: (req, file, cb) => {
         if (file.mimetype === 'application/pdf') {
@@ -111,10 +110,8 @@ async function savePdfToMongoDB(filename, buffer, pages = 0) {
             return false;
         }
         
-        // Convert buffer to base64 for storage
         const base64 = buffer.toString('base64');
         
-        // Store each PDF as a separate document
         await pdfCollection.updateOne(
             { _id: filename },
             { 
@@ -136,32 +133,12 @@ async function savePdfToMongoDB(filename, buffer, pages = 0) {
     }
 }
 
-async function loadPdfFromMongoDB(filename) {
-    try {
-        if (!pdfCollection) return null;
-        const result = await pdfCollection.findOne({ _id: filename });
-        if (result) {
-            // Convert base64 back to buffer
-            const buffer = Buffer.from(result.bytes, 'base64');
-            return {
-                bytes: buffer.buffer,
-                pages: result.pages || 0
-            };
-        }
-        return null;
-    } catch (error) {
-        console.error(`❌ Error loading PDF ${filename}:`, error.message);
-        return null;
-    }
-}
-
 async function loadAllPdfsFromMongoDB() {
     try {
         if (!pdfCollection) return {};
         const pdfs = await pdfCollection.find({}).toArray();
         const result = {};
         pdfs.forEach(pdf => {
-            // Convert base64 back to buffer
             const buffer = Buffer.from(pdf.bytes, 'base64');
             result[pdf._id] = {
                 bytes: buffer.buffer,
@@ -173,18 +150,6 @@ async function loadAllPdfsFromMongoDB() {
     } catch (error) {
         console.error('❌ Error loading PDFs:', error.message);
         return {};
-    }
-}
-
-async function deletePdfFromMongoDB(filename) {
-    try {
-        if (!pdfCollection) return false;
-        await pdfCollection.deleteOne({ _id: filename });
-        console.log(`✅ PDF deleted: ${filename}`);
-        return true;
-    } catch (error) {
-        console.error(`❌ Error deleting PDF ${filename}:`, error.message);
-        return false;
     }
 }
 
@@ -218,7 +183,6 @@ async function saveDataToMongoDB(data) {
             return false;
         }
         
-        // Save ONLY employee data to main collection (NO PDFs)
         const employeeDataToSave = {
             employees: data.employees || [],
             settings: data.settings || { testMode: false },
@@ -242,16 +206,12 @@ async function saveDataToMongoDB(data) {
 }
 
 async function initializeData() {
-    // Load employee data
     let data = await loadDataFromMongoDB();
-    
-    // Load PDFs separately
     const pdfs = await loadAllPdfsFromMongoDB();
     
     if (data) {
         if (!data.settings) data.settings = { testMode: false };
         if (!data.employees) data.employees = [];
-        // Attach PDFs
         data.pdfs = pdfs;
         dataCache = data;
         employeeData = data.employees || [];
@@ -278,52 +238,28 @@ async function initializeData() {
 // ============================================
 
 function extractEmpId(text) {
-    const empCodeMatch = text.match(/Emp\s*Code[:.\s]*([0-9]{4,6})/i);
-    if (empCodeMatch) {
-        const id = empCodeMatch[1].trim();
-        if (id.length >= 4 && id.length <= 6) return id;
-    }
+    const patterns = [
+        /Emp\s*Code[:.\s]*([0-9]{4,6})/i,
+        /Emp\s*Code[:.\s]*(PPRR[0-9]+)/i,
+        /Emp\s*Code[:.\s]*(TXIX[0-9]+)/i,
+        /Emp\s*Code[:.\s]*(T1UB[0-9]+)/i,
+        /Employee\s*Code[:.\s]*([0-9]{4,6})/i,
+        /PPRR([0-9]+)/i,
+        /TXIX([0-9]+)/i,
+        /T1UB([0-9]+)/i,
+        /\b([0-9]{4,6})\b/
+    ];
     
-    const empCodePprrMatch = text.match(/Emp\s*Code[:.\s]*(PPRR[0-9]+)/i);
-    if (empCodePprrMatch) {
-        let id = empCodePprrMatch[1].trim();
-        id = id.replace(/[^A-Z0-9]/g, '');
-        if (id.length >= 4) return id;
+    for (const pattern of patterns) {
+        const match = text.match(pattern);
+        if (match) {
+            let id = match[1] ? match[1].trim() : match[0].trim();
+            id = id.replace(/[^A-Z0-9]/g, '');
+            if (id.length >= 4 && id.length <= 8) {
+                return id;
+            }
+        }
     }
-    
-    const employeeCodeMatch = text.match(/Employee\s*Code[:.\s]*([0-9]{4,6})/i);
-    if (employeeCodeMatch) {
-        const id = employeeCodeMatch[1].trim();
-        if (id.length >= 4 && id.length <= 6) return id;
-    }
-    
-    const pprrMatch = text.match(/(PPRR[0-9]+)/i);
-    if (pprrMatch) {
-        let id = pprrMatch[1].trim();
-        id = id.replace(/[^A-Z0-9]/g, '');
-        if (id.length >= 4) return id;
-    }
-    
-    const numericMatch = text.match(/\b([0-9]{4,6})\b/);
-    if (numericMatch) {
-        const id = numericMatch[1].trim();
-        if (id.length >= 4 && id.length <= 6) return id;
-    }
-    
-    const txixMatch = text.match(/(TXIX[0-9]+)/i);
-    if (txixMatch) {
-        let id = txixMatch[1].trim();
-        id = id.replace(/[^A-Z0-9]/g, '');
-        if (id.length >= 4) return id;
-    }
-    
-    const t1ubMatch = text.match(/(T1UB[0-9]+)/i);
-    if (t1ubMatch) {
-        let id = t1ubMatch[1].trim();
-        id = id.replace(/[^A-Z0-9]/g, '');
-        if (id.length >= 4) return id;
-    }
-    
     return null;
 }
 
@@ -333,7 +269,6 @@ function extractName(text) {
         /Employee Name[:.\s]*([A-Z\s]+?)(?=\s+No of Days|\s+Emp Code|\s+Aadhaar|\s+Designation|\s+UAN|\s+ESIC|\s+Dated|$)/i,
         /Name[:.\s]*([A-Z\s]+?)(?=\s+No of Days|\s+Emp Code|\s+Aadhaar|\s+Designation|\s+UAN|\s+ESIC|\s+Dated|$)/i,
         /Name\s+([A-Z]{2,}(?:\s+[A-Z]{2,})*)/i,
-        /Employee\s+([A-Z]{2,}(?:\s+[A-Z]{2,})*)/i,
     ];
     
     for (const pattern of patterns) {
@@ -377,7 +312,7 @@ function findEmployee(empId) {
 }
 
 // ============================================
-// ⭐ FIXED: ADMIN AUTHENTICATION
+// ADMIN AUTHENTICATION
 // ============================================
 
 app.post('/api/admin/login', (req, res) => {
@@ -387,18 +322,10 @@ app.post('/api/admin/login', (req, res) => {
             return res.status(400).json({ success: false, message: 'Password is required' });
         }
         if (password === ADMIN_PASSWORD) {
-            // Generate a simple session token
-            const token = Buffer.from(`${Date.now()}:${password}`).toString('base64');
-            adminSessions[token] = { 
-                createdAt: Date.now(),
-                expiresAt: Date.now() + (24 * 60 * 60 * 1000)
-            };
-            res.json({ 
-                success: true, 
-                token: token, 
-                message: 'Login successful', 
-                expiresIn: '24 hours' 
-            });
+            const expiry = Date.now() + (24 * 60 * 60 * 1000);
+            const tokenData = `${expiry}:${password}`;
+            const token = Buffer.from(tokenData).toString('base64');
+            res.json({ success: true, token: token, message: 'Login successful', expiresIn: '24 hours' });
         } else {
             res.status(401).json({ success: false, message: 'Invalid password' });
         }
@@ -414,32 +341,18 @@ app.post('/api/admin/verify', (req, res) => {
         if (!token) {
             return res.json({ success: false, message: 'No token provided' });
         }
-        
-        // Check if token exists in sessions
-        const session = adminSessions[token];
-        if (!session) {
-            return res.json({ success: false, message: 'Invalid or expired session' });
-        }
-        
-        // Check if token is expired
-        if (Date.now() > session.expiresAt) {
-            delete adminSessions[token];
-            return res.json({ success: false, message: 'Token expired' });
-        }
-        
-        // Verify the password from token
         try {
             const decoded = Buffer.from(token, 'base64').toString();
-            const [, password] = decoded.split(':');
+            const [expiry, password] = decoded.split(':');
+            if (Date.now() > parseInt(expiry)) {
+                return res.json({ success: false, message: 'Token expired' });
+            }
             if (password === ADMIN_PASSWORD) {
-                // Refresh session expiry
-                session.expiresAt = Date.now() + (24 * 60 * 60 * 1000);
                 return res.json({ success: true, message: 'Token valid' });
             }
         } catch (e) {
-            return res.json({ success: false, message: 'Invalid token format' });
+            return res.json({ success: false, message: 'Invalid token' });
         }
-        
         res.json({ success: false, message: 'Invalid token' });
     } catch (error) {
         console.error('❌ Verify error:', error);
@@ -460,7 +373,6 @@ app.post('/api/upload-pdfs', upload.array('pdfs', 50), async (req, res) => {
         console.log(`📤 Received ${req.files.length} PDF files for upload`);
         let savedCount = 0;
         
-        // Parse metadata from the request
         let metadata = {};
         try {
             if (req.body.metadata) {
@@ -474,7 +386,6 @@ app.post('/api/upload-pdfs', upload.array('pdfs', 50), async (req, res) => {
             const filename = file.originalname;
             const pages = metadata[filename] || 0;
             
-            // Save PDF directly to MongoDB
             const saved = await savePdfToMongoDB(filename, file.buffer, pages);
             if (saved) {
                 savedCount++;
@@ -547,24 +458,15 @@ app.get('/api/missing-payslips', async (req, res) => {
         
         const pdfFiles = Object.keys(pdfs);
         
-        // Count employees per PDF file
         const pdfStats = pdfFiles.map(pdfName => {
             const foundInPdf = data.employees.filter(emp => 
                 emp.pdfFile === pdfName && emp.pageNumber
             );
             
-            const notFoundInPdf = data.employees.filter(emp => 
-                emp.pdfFile !== pdfName || !emp.pageNumber
-            );
-            
             return {
                 pdfName: pdfName,
-                totalEmployeesInPdf: foundInPdf.length,
-                totalEmployeesOverall: data.employees.length,
                 found: foundInPdf.length,
-                missing: data.employees.length - foundInPdf.length,
-                sampleFound: foundInPdf.slice(0, 5).map(e => e.empId),
-                sampleMissing: notFoundInPdf.slice(0, 5).map(e => e.empId)
+                missing: data.employees.length - foundInPdf.length
             };
         });
         
@@ -597,7 +499,6 @@ app.get('/api/data', async (req, res) => {
     try {
         const data = await loadDataFromMongoDB();
         if (data) {
-            // Also load PDFs
             const pdfs = await loadAllPdfsFromMongoDB();
             data.pdfs = pdfs;
             dataCache = data;
@@ -622,7 +523,6 @@ app.post('/api/data', async (req, res) => {
         if (!data.employees) data.employees = [];
         if (!data.settings) data.settings = { testMode: false };
         
-        // Save employee data only (PDFs are uploaded separately)
         const saved = await saveDataToMongoDB(data);
         if (saved) {
             dataCache = data;

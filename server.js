@@ -2,6 +2,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const { MongoClient } = require('mongodb');
+const multer = require('multer');
 const app = express();
 
 // Configuration
@@ -25,6 +26,23 @@ let employeeData = [];
 console.log('🚀 Starting server...');
 console.log('🔒 Admin password is set from environment variables');
 
+// Configure multer for PDF uploads (memory storage for binary data)
+const storage = multer.memoryStorage();
+const upload = multer({
+    storage: storage,
+    limits: {
+        fileSize: 50 * 1024 * 1024, // 50MB limit per file
+        files: 50 // Max 50 files
+    },
+    fileFilter: (req, file, cb) => {
+        if (file.mimetype === 'application/pdf') {
+            cb(null, true);
+        } else {
+            cb(new Error('Only PDF files are allowed'), false);
+        }
+    }
+});
+
 // ============================================
 // MIDDLEWARE
 // ============================================
@@ -34,7 +52,7 @@ app.use(express.urlencoded({ extended: true, limit: '500mb' }));
 
 app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, DELETE');
     res.header('Access-Control-Allow-Headers', 'Content-Type');
     if (req.method === 'OPTIONS') {
         return res.sendStatus(200);
@@ -82,31 +100,34 @@ async function connectToMongoDB() {
 }
 
 // ============================================
-// PDF STORAGE FUNCTIONS (FIXED)
+// PDF STORAGE FUNCTIONS
 // ============================================
 
-async function savePdfToMongoDB(filename, pdfData) {
+async function savePdfToMongoDB(filename, buffer, pages = 0) {
     try {
         if (!pdfCollection) {
             console.log('⚠️ No MongoDB connection, skipping PDF save');
             return false;
         }
         
+        // Convert buffer to base64 for storage
+        const base64 = buffer.toString('base64');
+        
         // Store each PDF as a separate document
         await pdfCollection.updateOne(
             { _id: filename },
             { 
                 $set: { 
-                    bytes: pdfData.bytes,
-                    pages: pdfData.pages || 0,
-                    size: pdfData.bytes ? pdfData.bytes.length : 0,
+                    bytes: base64,
+                    pages: pages || 0,
+                    size: buffer.length,
                     lastUpdated: new Date().toISOString()
                 }
             },
             { upsert: true }
         );
         
-        console.log(`✅ PDF saved: ${filename} (${pdfData.bytes ? (pdfData.bytes.length/1024/1024).toFixed(2) : 0} MB)`);
+        console.log(`✅ PDF saved: ${filename} (${(buffer.length/1024/1024).toFixed(2)} MB)`);
         return true;
     } catch (error) {
         console.error(`❌ Error saving PDF ${filename}:`, error.message);
@@ -119,8 +140,10 @@ async function loadPdfFromMongoDB(filename) {
         if (!pdfCollection) return null;
         const result = await pdfCollection.findOne({ _id: filename });
         if (result) {
+            // Convert base64 back to buffer
+            const buffer = Buffer.from(result.bytes, 'base64');
             return {
-                bytes: result.bytes,
+                bytes: buffer.buffer,
                 pages: result.pages || 0
             };
         }
@@ -137,8 +160,10 @@ async function loadAllPdfsFromMongoDB() {
         const pdfs = await pdfCollection.find({}).toArray();
         const result = {};
         pdfs.forEach(pdf => {
+            // Convert base64 back to buffer
+            const buffer = Buffer.from(pdf.bytes, 'base64');
             result[pdf._id] = {
-                bytes: pdf.bytes,
+                bytes: buffer.buffer,
                 pages: pdf.pages || 0
             };
         });
@@ -192,8 +217,7 @@ async function saveDataToMongoDB(data) {
             return false;
         }
         
-        // ⭐ FIX: Save ONLY employee data to main collection (NO PDFs)
-        // PDFs are saved separately in the pdfs collection
+        // Save ONLY employee data to main collection (NO PDFs)
         const employeeDataToSave = {
             employees: data.employees || [],
             settings: data.settings || { testMode: false },
@@ -205,15 +229,6 @@ async function saveDataToMongoDB(data) {
             { $set: employeeDataToSave },
             { upsert: true }
         );
-        
-        // ⭐ Save PDFs to their own collection (each as separate document)
-        if (data.pdfs) {
-            for (const [filename, pdfData] of Object.entries(data.pdfs)) {
-                if (pdfData.bytes) {
-                    await savePdfToMongoDB(filename, pdfData);
-                }
-            }
-        }
         
         employeeData = data.employees || [];
         console.log(`✅ Data saved to MongoDB: ${employeeData.length} employees`);
@@ -410,6 +425,52 @@ app.post('/api/admin/verify', (req, res) => {
 });
 
 // ============================================
+// PDF UPLOAD ENDPOINT (NEW - SPLIT UPLOAD)
+// ============================================
+
+app.post('/api/upload-pdfs', upload.array('pdfs', 50), async (req, res) => {
+    try {
+        if (!req.files || req.files.length === 0) {
+            return res.status(400).json({ error: 'No PDF files uploaded' });
+        }
+        
+        console.log(`📤 Received ${req.files.length} PDF files for upload`);
+        let savedCount = 0;
+        
+        // Parse metadata from the request
+        let metadata = {};
+        try {
+            if (req.body.metadata) {
+                metadata = JSON.parse(req.body.metadata);
+            }
+        } catch (e) {
+            console.log('⚠️ No metadata provided');
+        }
+        
+        for (const file of req.files) {
+            const filename = file.originalname;
+            const pages = metadata[filename] || 0;
+            
+            // Save PDF directly to MongoDB
+            const saved = await savePdfToMongoDB(filename, file.buffer, pages);
+            if (saved) {
+                savedCount++;
+            }
+        }
+        
+        res.json({
+            success: true,
+            message: `${savedCount} PDF(s) uploaded successfully`,
+            uploaded: savedCount,
+            total: req.files.length
+        });
+    } catch (error) {
+        console.error('❌ PDF upload error:', error);
+        res.status(500).json({ error: 'PDF upload failed: ' + error.message });
+    }
+});
+
+// ============================================
 // DOWNLOAD TRACKING
 // ============================================
 
@@ -455,11 +516,13 @@ app.post('/api/track-download', async (req, res) => {
 app.get('/api/missing-payslips', async (req, res) => {
     try {
         const data = await loadDataFromMongoDB();
+        const pdfs = await loadAllPdfsFromMongoDB();
+        
         if (!data || !data.employees) {
             return res.json({ employees: [], pdfs: [] });
         }
         
-        const pdfFiles = data.pdfs ? Object.keys(data.pdfs) : [];
+        const pdfFiles = Object.keys(pdfs);
         
         // Count employees per PDF file
         const pdfStats = pdfFiles.map(pdfName => {
@@ -537,13 +600,14 @@ app.post('/api/data', async (req, res) => {
         if (!data.pdfs) data.pdfs = {};
         if (!data.settings) data.settings = { testMode: false };
         
+        // Save employee data only (PDFs are uploaded separately)
         const saved = await saveDataToMongoDB(data);
         if (saved) {
             dataCache = data;
             employeeData = data.employees || [];
             res.json({ 
                 success: true, 
-                message: 'Data saved successfully',
+                message: 'Employee data saved successfully',
                 lastUpdated: data.lastUpdated
             });
         } else {

@@ -34,7 +34,6 @@
         .tab-btn:hover:not(.active) { background: #f1f5f9; }
         .tab-btn.admin-tab { display: none; }
         .tab-btn.admin-tab.visible { display: inline-flex; }
-        .tab-btn .download-count-badge { background: #22c55e; color: white; border-radius: 30px; padding: 0.1rem 0.6rem; font-size: 0.6rem; margin-left: 0.3rem; }
 
         .admin-toggle-link { position: fixed; bottom: 20px; right: 24px; background: white; padding: 8px 14px; border-radius: 40px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); border: 1px solid #e2e8f0; font-size: 0.8rem; color: #64748b; cursor: pointer; transition: all 0.2s; z-index: 50; display: flex; align-items: center; gap: 0.4rem; user-select: none; }
         .admin-toggle-link:hover { background: #f1f5f9; color: #1e293b; border-color: #94a3b8; }
@@ -542,7 +541,7 @@
     }
 
     // ============================================
-    // ⭐ FIXED: MISSING PAYSLIPS LOG
+    // MISSING PAYSLIPS LOG
     // ============================================
 
     async function loadMissingLog() {
@@ -564,18 +563,15 @@
 
         let html = '';
         
-        // Summary
         const missingCount = data.totalEmployees - data.totalWithPayslip;
         html += `<div style="padding: 0.5rem; background: #f1f5f9; border-radius: 8px; margin-bottom: 0.5rem;">
             <strong>Summary:</strong> ${data.totalEmployees} total employees, ${data.totalWithPayslip} with payslips, <span style="color: ${missingCount === 0 ? '#16a34a' : '#dc2626'};">${missingCount} missing</span>
         </div>`;
 
-        // PDF Status - per file
         if (data.pdfStats && data.pdfStats.length > 0) {
             html += `<div style="font-size: 0.8rem; padding: 0.3rem 0.5rem; color: #475569;">
                 <strong>PDF Status (per file):</strong>`;
             data.pdfStats.forEach(pdf => {
-                // Get employees assigned to THIS PDF only
                 const assignedToThisPdf = data.employees.filter(emp => 
                     emp.pdfFile === pdf.pdfName
                 );
@@ -595,7 +591,6 @@
             html += `</div>`;
         }
 
-        // Missing employees list - show ALL
         if (data.missingEmployees && data.missingEmployees.length > 0) {
             html += `<div style="font-weight: 600; padding: 0.3rem 0.5rem; color: #dc2626; border-top: 1px solid #e2e8f0; margin-top: 0.5rem;">
                 ⚠️ Employees WITHOUT any payslip (${data.missingEmployees.length}):
@@ -675,12 +670,11 @@
     }
 
     // ============================================
-    // ⭐ FIXED: SAVE DATA WITH SPLIT UPLOAD
+    // SAVE DATA WITH SPLIT UPLOAD
     // ============================================
 
     async function saveDataToServer(employees, pdfs = null, settings = null) {
         try {
-            // ⭐ NEW: Upload PDFs separately using FormData (binary upload)
             if (pdfs && Object.keys(pdfs).length > 0) {
                 const formData = new FormData();
                 const metadata = {};
@@ -694,7 +688,6 @@
                 
                 formData.append('metadata', JSON.stringify(metadata));
                 
-                // Upload PDFs as binary files
                 const pdfUploadResponse = await fetch('/api/upload-pdfs', {
                     method: 'POST',
                     body: formData
@@ -709,13 +702,11 @@
                 const pdfResult = await pdfUploadResponse.json();
                 console.log(`✅ ${pdfResult.uploaded} PDF(s) uploaded successfully`);
                 
-                // Update progress to show PDF upload completed
                 progressText.textContent = 'PDFs uploaded successfully, saving employee data...';
                 progressFill.style.width = '92%';
                 progressPercent.textContent = '92%';
             }
             
-            // Then save employee data (small, no PDFs)
             const data = { employees };
             if (settings) {
                 data.settings = settings;
@@ -1029,7 +1020,6 @@
             employeeData = mergedData;
             const currentTestMode = testModeToggle.checked;
             
-            // ⭐ FIXED: Split upload - PDFs and employee data are saved separately
             progressText.textContent = 'Uploading PDFs and saving data...';
             progressFill.style.width = '90%';
             progressPercent.textContent = '90%';
@@ -1153,7 +1143,7 @@
     });
 
     // ============================================
-    // TEST MODE - FULL ADMIN CONTROL
+    // TEST MODE
     // ============================================
 
     testModeToggle.addEventListener('change', function() {
@@ -1340,30 +1330,137 @@
     });
 
     // ============================================
+    // ADMIN FUNCTIONS
+    // ============================================
+
+    function lockAdmin() {
+        adminUnlocked = false;
+        adminToken = null;
+        sessionStorage.removeItem('adminToken');
+        adminLockOverlay.classList.remove('hidden');
+        adminPasswordInput.value = '';
+        adminLockError.textContent = '';
+        if (adminTabBtn) adminTabBtn.classList.remove('visible');
+        if (adminTabBtn && adminTabBtn.classList.contains('active')) {
+            adminTabBtn.classList.remove('active');
+            userTabBtn.classList.add('active');
+            document.getElementById('tab-admin').classList.remove('active');
+            document.getElementById('tab-user').classList.add('active');
+        }
+        setTimeout(() => adminPasswordInput.focus(), 100);
+    }
+
+    async function unlockAdmin() {
+        adminUnlocked = true;
+        adminLockOverlay.classList.add('hidden');
+        if (adminTabBtn) adminTabBtn.classList.add('visible');
+        setAdminMsg('🔓 Admin panel unlocked.', 'success');
+        if (adminTabBtn) adminTabBtn.click();
+        await loadDataFromServer(true);
+        await loadMissingLog();
+    }
+
+    function closeAdminLock() {
+        adminLockOverlay.classList.add('hidden');
+        if (!adminUnlocked && adminTabBtn) adminTabBtn.classList.remove('visible');
+    }
+
+    adminLockCloseBtn.addEventListener('click', function(e) { e.stopPropagation(); closeAdminLock(); });
+    adminLockOverlay.addEventListener('click', function(e) { if (e.target === adminLockOverlay) closeAdminLock(); });
+    document.addEventListener('keydown', function(e) { if (e.key === 'Escape' && !adminLockOverlay.classList.contains('hidden')) closeAdminLock(); });
+
+    adminToggleLink.addEventListener('click', function() {
+        if (adminUnlocked) {
+            if (adminTabBtn) adminTabBtn.click();
+        } else {
+            adminLockOverlay.classList.remove('hidden');
+            setTimeout(() => adminPasswordInput.focus(), 100);
+        }
+    });
+
+    adminUnlockBtn.addEventListener('click', async function() {
+        const pass = adminPasswordInput.value.trim();
+        if (!pass) { 
+            adminLockError.textContent = 'Please enter the admin password.'; 
+            return; 
+        }
+        adminLockError.textContent = '⏳ Verifying...';
+        adminUnlockBtn.disabled = true;
+        adminUnlockBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Verifying...';
+        try {
+            const response = await fetch('/api/admin/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password: pass })
+            });
+            const result = await response.json();
+            adminUnlockBtn.disabled = false;
+            adminUnlockBtn.innerHTML = '<i class="fas fa-unlock-alt"></i> Unlock';
+            
+            if (result.success) {
+                if (result.token) {
+                    sessionStorage.setItem('adminToken', result.token);
+                    adminToken = result.token;
+                }
+                unlockAdmin();
+                adminLockError.textContent = '';
+            } else {
+                adminLockError.textContent = '❌ ' + (result.message || 'Incorrect password. Try again.');
+                adminPasswordInput.value = '';
+                adminPasswordInput.focus();
+            }
+        } catch (error) {
+            adminUnlockBtn.disabled = false;
+            adminUnlockBtn.innerHTML = '<i class="fas fa-unlock-alt"></i> Unlock';
+            adminLockError.textContent = '❌ Server error: ' + error.message;
+        }
+    });
+
+    adminPasswordInput.addEventListener('keydown', function(e) { if (e.key === 'Enter') adminUnlockBtn.click(); });
+
+    refreshMissingLogBtn.addEventListener('click', async function() {
+        if (!adminUnlocked) { lockAdmin(); return; }
+        await loadMissingLog();
+        setAdminMsg('🔄 Missing payslips log refreshed.', 'info');
+    });
+
+    // ============================================
     // INIT
     // ============================================
 
     async function init() {
-        adminUnlocked = false;
-        adminLockOverlay.classList.add('hidden');
-        if (adminTabBtn) adminTabBtn.classList.remove('visible');
-        adminToggleLink.style.display = 'flex';
-
-        if (adminToken) {
+        // Check for existing admin token
+        const savedToken = sessionStorage.getItem('adminToken');
+        if (savedToken) {
+            adminToken = savedToken;
             const isValid = await verifyAdminToken();
             if (isValid) {
                 adminUnlocked = true;
                 if (adminTabBtn) adminTabBtn.classList.add('visible');
                 console.log('🔓 Admin token restored from session');
+                await loadDataFromServer(true);
+                await loadMissingLog();
             } else {
                 sessionStorage.removeItem('adminToken');
                 adminToken = null;
+                adminUnlocked = false;
+                if (adminTabBtn) adminTabBtn.classList.remove('visible');
+                // Show lock overlay
+                adminLockOverlay.classList.remove('hidden');
+            }
+        } else {
+            adminUnlocked = false;
+            if (adminTabBtn) adminTabBtn.classList.remove('visible');
+            // Show lock overlay only if not already unlocked
+            if (!adminLockOverlay.classList.contains('hidden')) {
+                adminLockOverlay.classList.remove('hidden');
             }
         }
-
-        await loadDataFromServer(true);
-        if (adminUnlocked) await loadMissingLog();
         
+        // Load initial data
+        await loadDataFromServer(true);
+        
+        // Update test mode status
         if (!testModeToggle.checked) {
             testModeToggle.checked = false;
             updateTestModeStatus();
@@ -1382,10 +1479,12 @@
         console.log(`🔐 Admin auth: Server-side (secure)`);
     }
 
+    // Set initial tab state
     userTabBtn.classList.add('active');
     document.getElementById('tab-user').classList.add('active');
     document.getElementById('tab-admin').classList.remove('active');
 
+    // Start the app
     init();
 })();
 </script>

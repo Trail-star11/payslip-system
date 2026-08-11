@@ -344,7 +344,7 @@ app.post('/api/track-download', async (req, res) => {
 });
 
 // ============================================
-// MISSING PAYSLIPS LOG - FIXED
+// ⭐ FIXED: GET MISSING PAYSLIPS LOG
 // ============================================
 
 app.get('/api/missing-payslips', async (req, res) => {
@@ -354,29 +354,29 @@ app.get('/api/missing-payslips', async (req, res) => {
             return res.json({ employees: [], pdfs: [] });
         }
         
+        // Get all PDF filenames
         const pdfFiles = data.pdfs ? Object.keys(data.pdfs) : [];
         
+        // Count employees per PDF file
         const pdfStats = pdfFiles.map(pdfName => {
             // Employees found in this PDF
             const foundInPdf = data.employees.filter(emp => 
                 emp.pdfFile === pdfName && emp.pageNumber
             );
             
-            // Count employees that belong to this PDF
-            const totalInPdf = data.employees.filter(emp => 
-                emp.pdfFile === pdfName
-            ).length;
+            // Employees NOT found in this PDF (but exist in other PDFs or no PDF)
+            const notFoundInPdf = data.employees.filter(emp => 
+                emp.pdfFile !== pdfName || !emp.pageNumber
+            );
             
             return {
                 pdfName: pdfName,
-                totalEmployeesInPdf: totalInPdf || foundInPdf.length,
+                totalEmployeesInPdf: foundInPdf.length,
                 totalEmployeesOverall: data.employees.length,
                 found: foundInPdf.length,
-                missing: (totalInPdf || foundInPdf.length) - foundInPdf.length,
+                missing: data.employees.length - foundInPdf.length,
                 sampleFound: foundInPdf.slice(0, 5).map(e => e.empId),
-                sampleMissing: data.employees.filter(emp => 
-                    emp.pdfFile !== pdfName || !emp.pageNumber
-                ).slice(0, 5).map(e => e.empId)
+                sampleMissing: notFoundInPdf.slice(0, 5).map(e => e.empId)
             };
         });
         

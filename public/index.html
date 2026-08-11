@@ -366,85 +366,29 @@
     // ============================================
 
     function extractEmpId(text) {
-        const empCodeMatch = text.match(/Emp\s*Code[:.\s]*([0-9]{4,6})/i);
-        if (empCodeMatch) {
-            const id = empCodeMatch[1].trim();
-            if (id.length >= 4 && id.length <= 6) return id;
-        }
-        const empCodePprrMatch = text.match(/Emp\s*Code[:.\s]*(PPRR[0-9]+)/i);
-        if (empCodePprrMatch) {
-            let id = empCodePprrMatch[1].trim();
-            id = id.replace(/[^A-Z0-9]/g, '');
-            if (id.length >= 4) return id;
-        }
-        const employeeCodeMatch = text.match(/Employee\s*Code[:.\s]*([0-9]{4,6})/i);
-        if (employeeCodeMatch) {
-            const id = employeeCodeMatch[1].trim();
-            if (id.length >= 4 && id.length <= 6) return id;
-        }
-        const pprrMatch = text.match(/(PPRR[0-9]+)/i);
-        if (pprrMatch) {
-            let id = pprrMatch[1].trim();
-            id = id.replace(/[^A-Z0-9]/g, '');
-            if (id.length >= 4) return id;
-        }
-        const numericMatch = text.match(/\b([0-9]{4,6})\b/);
-        if (numericMatch) {
-            const id = numericMatch[1].trim();
-            if (id.length >= 4 && id.length <= 6) return id;
-        }
-        const txixMatch = text.match(/(TXIX[0-9]+)/i);
-        if (txixMatch) {
-            let id = txixMatch[1].trim();
-            id = id.replace(/[^A-Z0-9]/g, '');
-            if (id.length >= 4) return id;
-        }
-        const t1ubMatch = text.match(/(T1UB[0-9]+)/i);
-        if (t1ubMatch) {
-            let id = t1ubMatch[1].trim();
-            id = id.replace(/[^A-Z0-9]/g, '');
-            if (id.length >= 4) return id;
-        }
-        return null;
-    }
-
-    function extractRawTextFromPdfBytes(pdfBytes) {
-        try {
-            const decoder = new TextDecoder('utf-8', { fatal: false });
-            const text = decoder.decode(pdfBytes);
-            const ids = [];
-            const patterns = [
-                /Emp\s*Code\s*[:.\s]*(\d{4,6})/gi,
-                /Emp\s*Code\s*[:.\s]*(PPRR\d+)/gi,
-                /Emp\s*Code\s*[:.\s]*(TXIX\d+)/gi,
-                /Emp\s*Code\s*[:.\s]*(T1UB\d+)/gi,
-                /Employee\s*Code\s*[:.\s]*(\d{4,6})/gi,
-                /PPRR(\d+)/gi, /TXIX(\d+)/gi, /T1UB(\d+)/gi, /\b(\d{4,6})\b/gi,
-            ];
-            for (const pattern of patterns) {
-                let match;
-                while ((match = pattern.exec(text)) !== null) {
-                    let id = match[1] ? match[1].trim() : match[0].trim();
-                    if (/^\d+$/.test(id) && id.length >= 4 && id.length <= 6) {
-                        if (!ids.includes(id)) ids.push(id);
-                    } else {
-                        id = id.replace(/[^A-Z0-9]/g, '');
-                        if (id.length >= 4 && !ids.includes(id)) ids.push(id);
-                    }
+        const patterns = [
+            /Emp\s*Code[:.\s]*([0-9]{4,6})/i,
+            /Emp\s*Code[:.\s]*(PPRR[0-9]+)/i,
+            /Emp\s*Code[:.\s]*(TXIX[0-9]+)/i,
+            /Emp\s*Code[:.\s]*(T1UB[0-9]+)/i,
+            /Employee\s*Code[:.\s]*([0-9]{4,6})/i,
+            /PPRR([0-9]+)/i,
+            /TXIX([0-9]+)/i,
+            /T1UB([0-9]+)/i,
+            /\b([0-9]{4,6})\b/
+        ];
+        
+        for (const pattern of patterns) {
+            const match = text.match(pattern);
+            if (match) {
+                let id = match[1] ? match[1].trim() : match[0].trim();
+                id = id.replace(/[^A-Z0-9]/g, '');
+                if (id.length >= 4 && id.length <= 8) {
+                    return id;
                 }
             }
-            const names = [];
-            const namePattern = /Name\s+of\s+the\s+Employee\s*([A-Z\s]+?)(?=\s+No\s+of\s+Days|$)/gi;
-            let nameMatch;
-            while ((nameMatch = namePattern.exec(text)) !== null) {
-                let name = nameMatch[1].trim();
-                name = name.replace(/[^A-Za-z\s\.]/g, '');
-                if (name.length > 2 && !names.includes(name)) names.push(name);
-            }
-            return { ids, names, rawText: text };
-        } catch (error) {
-            return { ids: [], names: [], rawText: '' };
         }
+        return null;
     }
 
     function extractName(text) {
@@ -454,13 +398,24 @@
             /Name[:.\s]*([A-Z\s]+?)(?=\s+No of Days|\s+Emp Code|\s+Aadhaar|\s+Designation|\s+UAN|\s+ESIC|\s+Dated|$)/i,
             /Name\s+([A-Z]{2,}(?:\s+[A-Z]{2,})*)/i,
         ];
+        
         for (const pattern of patterns) {
             const match = text.match(pattern);
             if (match) {
                 let name = match[1].trim();
-                name = name.replace(/\s+No of Days.*$/i, '').replace(/\s+Emp Code.*$/i, '').replace(/\s+Aadhaar.*$/i, '').replace(/\s+Designation.*$/i, '').replace(/\s+UAN.*$/i, '').replace(/\s+ESIC.*$/i, '').replace(/\s+Dated.*$/i, '').replace(/\s+Location.*$/i, '').replace(/\s+Pay-mode.*$/i, '');
+                name = name.replace(/\s+No of Days.*$/i, '')
+                           .replace(/\s+Emp Code.*$/i, '')
+                           .replace(/\s+Aadhaar.*$/i, '')
+                           .replace(/\s+Designation.*$/i, '')
+                           .replace(/\s+UAN.*$/i, '')
+                           .replace(/\s+ESIC.*$/i, '')
+                           .replace(/\s+Dated.*$/i, '')
+                           .replace(/\s+Location.*$/i, '')
+                           .replace(/\s+Pay-mode.*$/i, '');
                 name = name.replace(/[^A-Za-z\s\.]/g, '');
-                if (name.length > 1) return name.trim();
+                if (name.length > 1) {
+                    return name.trim();
+                }
             }
         }
         return null;
@@ -469,8 +424,10 @@
     function findEmployee(empId) {
         if (!empId) return null;
         empId = empId.toUpperCase().trim();
+        
         let found = employeeData.find(e => e.empId.toUpperCase() === empId);
         if (found) return found;
+        
         const numericPart = empId.replace(/^[A-Z]+/, '');
         if (numericPart && numericPart.length >= 4) {
             found = employeeData.find(e => {
@@ -572,20 +529,12 @@
             html += `<div style="font-size: 0.8rem; padding: 0.3rem 0.5rem; color: #475569;">
                 <strong>PDF Status (per file):</strong>`;
             data.pdfStats.forEach(pdf => {
-                const assignedToThisPdf = data.employees.filter(emp => 
-                    emp.pdfFile === pdf.pdfName
-                );
-                const foundInThisPdf = assignedToThisPdf.filter(emp => 
-                    emp.pageNumber && emp.pageNumber > 0
-                );
-                const missingInThisPdf = assignedToThisPdf.length - foundInThisPdf.length;
-                
-                const isComplete = missingInThisPdf === 0;
-                const status = isComplete ? '✅ Complete' : `⚠️ ${missingInThisPdf} missing in this PDF`;
+                const isComplete = pdf.missing === 0;
+                const status = isComplete ? '✅ Complete' : `⚠️ ${pdf.missing} missing`;
                 
                 html += `<div style="padding: 0.2rem 0; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e2e8f0;">
                     <span>📄 ${pdf.pdfName}</span>
-                    <span style="${isComplete ? 'color: #16a34a;' : 'color: #f59e0b;'}">${foundInThisPdf.length}/${assignedToThisPdf.length} found (${status})</span>
+                    <span style="${isComplete ? 'color: #16a34a;' : 'color: #f59e0b;'}">${pdf.found}/${data.totalEmployees} found (${status})</span>
                 </div>`;
             });
             html += `</div>`;
@@ -647,6 +596,7 @@
                             }
                         }
                     }
+                    console.log(`✅ Loaded ${loadedCount} PDFs from server`);
                 }
                 if (data.settings && data.settings.testMode !== undefined && !manualTestModeOverride) {
                     testModeToggle.checked = data.settings.testMode;
@@ -670,69 +620,68 @@
     }
 
     // ============================================
-    // SAVE DATA WITH SPLIT UPLOAD
+    // SAVE DATA WITH SINGLE PDF UPLOADS
     // ============================================
 
-async function saveDataToServer(employees, pdfs = null, settings = null) {
-    try {
-        if (pdfs && Object.keys(pdfs).length > 0) {
-            const formData = new FormData();
-            const metadata = {};
-            
-            // Log PDF sizes for debugging
-            console.log('📄 Uploading PDFs:');
-            for (const [filename, pdfData] of Object.entries(pdfs)) {
-                const bytes = new Uint8Array(pdfData.bytes);
-                const sizeInMB = bytes.length / (1024 * 1024);
-                console.log(`  - ${filename}: ${sizeInMB.toFixed(2)} MB`);
-                const blob = new Blob([bytes], { type: 'application/pdf' });
-                formData.append('pdfs', blob, filename);
-                metadata[filename] = pdfData.pages || 0;
+    async function saveDataToServer(employees, pdfs = null, settings = null) {
+        try {
+            // Upload PDFs one by one (slower but more reliable)
+            if (pdfs && Object.keys(pdfs).length > 0) {
+                const pdfNames = Object.keys(pdfs);
+                
+                for (let i = 0; i < pdfNames.length; i++) {
+                    const filename = pdfNames[i];
+                    const pdfData = pdfs[filename];
+                    
+                    const bytes = new Uint8Array(pdfData.bytes);
+                    const blob = new Blob([bytes], { type: 'application/pdf' });
+                    const formData = new FormData();
+                    formData.append('pdfs', blob, filename);
+                    
+                    progressText.textContent = `Uploading PDF ${i + 1}/${pdfNames.length}: ${filename}...`;
+                    progressFill.style.width = `${88 + (i / pdfNames.length) * 8}%`;
+                    progressPercent.textContent = `${Math.round(88 + (i / pdfNames.length) * 8)}%`;
+                    
+                    const pdfUploadResponse = await fetch('/api/upload-pdf', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    
+                    if (!pdfUploadResponse.ok) {
+                        const errorText = await pdfUploadResponse.text();
+                        console.error(`❌ PDF upload failed for ${filename}:`, errorText);
+                        throw new Error(`Failed to upload ${filename}: ${errorText}`);
+                    }
+                    
+                    const pdfResult = await pdfUploadResponse.json();
+                    console.log(`✅ ${filename} uploaded successfully`);
+                }
+                
+                progressText.textContent = 'All PDFs uploaded, saving employee data...';
+                progressFill.style.width = '95%';
+                progressPercent.textContent = '95%';
             }
             
-            formData.append('metadata', JSON.stringify(metadata));
+            // Then save employee data
+            const data = { employees };
+            if (settings) {
+                data.settings = settings;
+            }
+            data.lastUpdated = new Date().toISOString();
             
-            console.log('📤 Sending PDFs to server...');
-            const pdfUploadResponse = await fetch('/api/upload-pdfs', {
+            const result = await apiCall('/api/data', {
                 method: 'POST',
-                body: formData
+                body: JSON.stringify(data)
             });
             
-            const pdfResult = await pdfUploadResponse.json();
-            
-            if (!pdfUploadResponse.ok) {
-                console.error('❌ PDF upload failed:', pdfResult);
-                throw new Error(pdfResult.error || 'PDF upload failed');
-            }
-            
-            console.log(`✅ ${pdfResult.uploaded} PDF(s) uploaded successfully`);
-            if (pdfResult.errors) {
-                console.warn('⚠️ Some PDFs failed:', pdfResult.errors);
-            }
-            
-            progressText.textContent = 'PDFs uploaded successfully, saving employee data...';
-            progressFill.style.width = '92%';
-            progressPercent.textContent = '92%';
+            return true;
+        } catch (error) {
+            console.error('❌ Error saving data:', error);
+            setAdminMsg('⚠️ Could not save data to server: ' + error.message, 'error');
+            return false;
         }
-        
-        const data = { employees };
-        if (settings) {
-            data.settings = settings;
-        }
-        data.lastUpdated = new Date().toISOString();
-        
-        const result = await apiCall('/api/data', {
-            method: 'POST',
-            body: JSON.stringify(data)
-        });
-        
-        return true;
-    } catch (error) {
-        console.error('❌ Error saving data:', error);
-        setAdminMsg('⚠️ Could not save data to server: ' + error.message, 'error');
-        return false;
     }
-}
+
     // ============================================
     // RENDER FUNCTIONS
     // ============================================
@@ -938,21 +887,6 @@ async function saveDataToServer(employees, pdfs = null, settings = null) {
                                     const empEntry = { empId: foundId, name: name, pageNumber: i, pdfFile: pdfFile.name };
                                     const existing = allPdfEmployees.find(e => e.empId === foundId && e.pageNumber === i && e.pdfFile === pdfFile.name);
                                     if (!existing) allPdfEmployees.push(empEntry);
-                                } else {
-                                    const rawResult = extractRawTextFromPdfBytes(pdfBytes);
-                                    const pageRaw = rawResult.rawText;
-                                    const idMatch = pageRaw.match(/Emp\s*Code\s*(\d{4,6})/i) || pageRaw.match(/Emp\s*Code\s*(PPRR\d+)/i) || pageRaw.match(/\b(\d{4,6})\b/);
-                                    if (idMatch) {
-                                        let rawId = idMatch[1] || idMatch[0];
-                                        rawId = rawId.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-                                        if (rawId.length >= 4 && rawId.length <= 8) {
-                                            const nameMatch = pageRaw.match(/Name\s+of\s+the\s+Employee\s*([A-Z\s]+?)(?=\s+No\s+of\s+Days|$)/i);
-                                            const rawName = nameMatch ? nameMatch[1].trim().replace(/[^A-Za-z\s\.]/g, '') : `Employee ${i}`;
-                                            const empEntry = { empId: rawId, name: rawName, pageNumber: i, pdfFile: pdfFile.name };
-                                            const existing = allPdfEmployees.find(e => e.empId === rawId && e.pageNumber === i && e.pdfFile === pdfFile.name);
-                                            if (!existing) allPdfEmployees.push(empEntry);
-                                        }
-                                    }
                                 }
                             } catch (pageError) {
                                 console.log(`⚠️ Page ${i} error:`, pageError.message);
@@ -1452,16 +1386,12 @@ async function saveDataToServer(employees, pdfs = null, settings = null) {
                 adminToken = null;
                 adminUnlocked = false;
                 if (adminTabBtn) adminTabBtn.classList.remove('visible');
-                // Show lock overlay
                 adminLockOverlay.classList.remove('hidden');
             }
         } else {
             adminUnlocked = false;
             if (adminTabBtn) adminTabBtn.classList.remove('visible');
-            // Show lock overlay only if not already unlocked
-            if (!adminLockOverlay.classList.contains('hidden')) {
-                adminLockOverlay.classList.remove('hidden');
-            }
+            adminLockOverlay.classList.remove('hidden');
         }
         
         // Load initial data

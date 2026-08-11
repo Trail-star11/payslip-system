@@ -26,13 +26,13 @@ let employeeData = [];
 console.log('🚀 Starting server...');
 console.log('🔒 Admin password is set from environment variables');
 
-// Configure multer for PDF uploads
+// Configure multer for PDF uploads - INCREASED LIMITS
 const storage = multer.memoryStorage();
 const upload = multer({
     storage: storage,
     limits: {
-        fileSize: 50 * 1024 * 1024,
-        files: 50
+        fileSize: 100 * 1024 * 1024, // 100MB limit per file
+        files: 50 // Max 50 files
     },
     fileFilter: (req, file, cb) => {
         if (file.mimetype === 'application/pdf') {
@@ -110,8 +110,16 @@ async function savePdfToMongoDB(filename, buffer, pages = 0) {
             return false;
         }
         
+        // Convert buffer to base64 for storage
         const base64 = buffer.toString('base64');
         
+        // Check size before saving
+        const sizeInMB = base64.length / (1024 * 1024);
+        if (sizeInMB > 15) {
+            console.log(`⚠️ PDF ${filename} is ${sizeInMB.toFixed(2)}MB, near 16MB limit`);
+        }
+        
+        // Store each PDF as a separate document
         await pdfCollection.updateOne(
             { _id: filename },
             { 
@@ -139,11 +147,15 @@ async function loadAllPdfsFromMongoDB() {
         const pdfs = await pdfCollection.find({}).toArray();
         const result = {};
         pdfs.forEach(pdf => {
-            const buffer = Buffer.from(pdf.bytes, 'base64');
-            result[pdf._id] = {
-                bytes: buffer.buffer,
-                pages: pdf.pages || 0
-            };
+            try {
+                const buffer = Buffer.from(pdf.bytes, 'base64');
+                result[pdf._id] = {
+                    bytes: buffer.buffer,
+                    pages: pdf.pages || 0
+                };
+            } catch(e) {
+                console.error(`❌ Error parsing PDF ${pdf._id}:`, e.message);
+            }
         });
         console.log(`✅ Loaded ${Object.keys(result).length} PDFs from MongoDB`);
         return result;
@@ -361,7 +373,7 @@ app.post('/api/admin/verify', (req, res) => {
 });
 
 // ============================================
-// PDF UPLOAD ENDPOINT
+// ⭐ FIXED: PDF UPLOAD ENDPOINT WITH BETTER ERROR HANDLING
 // ============================================
 
 app.post('/api/upload-pdfs', upload.array('pdfs', 50), async (req, res) => {
@@ -372,7 +384,9 @@ app.post('/api/upload-pdfs', upload.array('pdfs', 50), async (req, res) => {
         
         console.log(`📤 Received ${req.files.length} PDF files for upload`);
         let savedCount = 0;
+        let errors = [];
         
+        // Parse metadata from the request
         let metadata = {};
         try {
             if (req.body.metadata) {
@@ -386,21 +400,43 @@ app.post('/api/upload-pdfs', upload.array('pdfs', 50), async (req, res) => {
             const filename = file.originalname;
             const pages = metadata[filename] || 0;
             
-            const saved = await savePdfToMongoDB(filename, file.buffer, pages);
-            if (saved) {
-                savedCount++;
+            console.log(`📄 Saving PDF: ${filename} (${(file.size/1024/1024).toFixed(2)} MB)`);
+            
+            try {
+                const saved = await savePdfToMongoDB(filename, file.buffer, pages);
+                if (saved) {
+                    savedCount++;
+                } else {
+                    errors.push(`Failed to save ${filename}`);
+                }
+            } catch (err) {
+                console.error(`❌ Error saving ${filename}:`, err.message);
+                errors.push(`${filename}: ${err.message}`);
             }
         }
         
-        res.json({
-            success: true,
-            message: `${savedCount} PDF(s) uploaded successfully`,
-            uploaded: savedCount,
-            total: req.files.length
-        });
+        // Even if some PDFs fail, return success for those that worked
+        if (savedCount > 0) {
+            res.json({
+                success: true,
+                message: `${savedCount} of ${req.files.length} PDF(s) uploaded successfully`,
+                uploaded: savedCount,
+                total: req.files.length,
+                errors: errors.length > 0 ? errors : undefined
+            });
+        } else {
+            res.status(500).json({
+                success: false,
+                error: 'Failed to upload any PDFs',
+                details: errors
+            });
+        }
     } catch (error) {
         console.error('❌ PDF upload error:', error);
-        res.status(500).json({ error: 'PDF upload failed: ' + error.message });
+        res.status(500).json({ 
+            error: 'PDF upload failed: ' + error.message,
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        });
     }
 });
 

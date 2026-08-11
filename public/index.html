@@ -514,6 +514,7 @@
             const data = await response.json();
             return data.success || false;
         } catch (error) {
+            console.error('❌ Token verification error:', error);
             return false;
         }
     }

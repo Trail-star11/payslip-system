@@ -673,59 +673,66 @@
     // SAVE DATA WITH SPLIT UPLOAD
     // ============================================
 
-    async function saveDataToServer(employees, pdfs = null, settings = null) {
-        try {
-            if (pdfs && Object.keys(pdfs).length > 0) {
-                const formData = new FormData();
-                const metadata = {};
-                
-                for (const [filename, pdfData] of Object.entries(pdfs)) {
-                    const bytes = new Uint8Array(pdfData.bytes);
-                    const blob = new Blob([bytes], { type: 'application/pdf' });
-                    formData.append('pdfs', blob, filename);
-                    metadata[filename] = pdfData.pages || 0;
-                }
-                
-                formData.append('metadata', JSON.stringify(metadata));
-                
-                const pdfUploadResponse = await fetch('/api/upload-pdfs', {
-                    method: 'POST',
-                    body: formData
-                });
-                
-                if (!pdfUploadResponse.ok) {
-                    const errorText = await pdfUploadResponse.text();
-                    console.error('❌ PDF upload failed:', errorText);
-                    throw new Error('PDF upload failed: ' + errorText);
-                }
-                
-                const pdfResult = await pdfUploadResponse.json();
-                console.log(`✅ ${pdfResult.uploaded} PDF(s) uploaded successfully`);
-                
-                progressText.textContent = 'PDFs uploaded successfully, saving employee data...';
-                progressFill.style.width = '92%';
-                progressPercent.textContent = '92%';
+async function saveDataToServer(employees, pdfs = null, settings = null) {
+    try {
+        if (pdfs && Object.keys(pdfs).length > 0) {
+            const formData = new FormData();
+            const metadata = {};
+            
+            // Log PDF sizes for debugging
+            console.log('📄 Uploading PDFs:');
+            for (const [filename, pdfData] of Object.entries(pdfs)) {
+                const bytes = new Uint8Array(pdfData.bytes);
+                const sizeInMB = bytes.length / (1024 * 1024);
+                console.log(`  - ${filename}: ${sizeInMB.toFixed(2)} MB`);
+                const blob = new Blob([bytes], { type: 'application/pdf' });
+                formData.append('pdfs', blob, filename);
+                metadata[filename] = pdfData.pages || 0;
             }
             
-            const data = { employees };
-            if (settings) {
-                data.settings = settings;
-            }
-            data.lastUpdated = new Date().toISOString();
+            formData.append('metadata', JSON.stringify(metadata));
             
-            const result = await apiCall('/api/data', {
+            console.log('📤 Sending PDFs to server...');
+            const pdfUploadResponse = await fetch('/api/upload-pdfs', {
                 method: 'POST',
-                body: JSON.stringify(data)
+                body: formData
             });
             
-            return true;
-        } catch (error) {
-            console.error('❌ Error saving data:', error);
-            setAdminMsg('⚠️ Could not save data to server: ' + error.message, 'error');
-            return false;
+            const pdfResult = await pdfUploadResponse.json();
+            
+            if (!pdfUploadResponse.ok) {
+                console.error('❌ PDF upload failed:', pdfResult);
+                throw new Error(pdfResult.error || 'PDF upload failed');
+            }
+            
+            console.log(`✅ ${pdfResult.uploaded} PDF(s) uploaded successfully`);
+            if (pdfResult.errors) {
+                console.warn('⚠️ Some PDFs failed:', pdfResult.errors);
+            }
+            
+            progressText.textContent = 'PDFs uploaded successfully, saving employee data...';
+            progressFill.style.width = '92%';
+            progressPercent.textContent = '92%';
         }
+        
+        const data = { employees };
+        if (settings) {
+            data.settings = settings;
+        }
+        data.lastUpdated = new Date().toISOString();
+        
+        const result = await apiCall('/api/data', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+        
+        return true;
+    } catch (error) {
+        console.error('❌ Error saving data:', error);
+        setAdminMsg('⚠️ Could not save data to server: ' + error.message, 'error');
+        return false;
     }
-
+}
     // ============================================
     // RENDER FUNCTIONS
     // ============================================

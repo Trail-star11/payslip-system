@@ -24,12 +24,13 @@ console.log('🚀 Starting server...');
 console.log('🔒 Admin password is set from environment variables');
 
 // ============================================
-// MIDDLEWARE
+// MIDDLEWARE - MUST come BEFORE routes
 // ============================================
 
 app.use(express.json({ limit: '500mb' }));
 app.use(express.urlencoded({ extended: true, limit: '500mb' }));
 
+// CORS middleware
 app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
     res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -40,6 +41,7 @@ app.use((req, res, next) => {
     next();
 });
 
+// Serve static files
 app.use(express.static('public'));
 
 // ============================================
@@ -153,11 +155,10 @@ async function initializeData() {
 }
 
 // ============================================
-// ⭐ FIXED: EXTRACTION - KEEP ID AS FOUND
+// EXTRACTION FUNCTIONS - KEEP ID AS FOUND
 // ============================================
 
 function extractEmpId(text) {
-    // Look for Emp Code pattern - keep EXACT match
     // Pattern 1: "Emp Code" followed by number (like "Emp Code 12095")
     const empCodeMatch = text.match(/Emp\s*Code[:.\s]*([0-9]{4,6})/i);
     if (empCodeMatch) {
@@ -189,7 +190,7 @@ function extractEmpId(text) {
         }
     }
     
-    // Pattern 4: Just PPRR followed by number (without "Emp Code")
+    // Pattern 4: Just PPRR followed by number
     const pprrMatch = text.match(/(PPRR[0-9]+)/i);
     if (pprrMatch) {
         let id = pprrMatch[1].trim();
@@ -200,7 +201,17 @@ function extractEmpId(text) {
         }
     }
     
-    // Pattern 5: TXIX format
+    // Pattern 5: Standalone number (like "12095")
+    const numericMatch = text.match(/\b([0-9]{4,6})\b/);
+    if (numericMatch) {
+        const id = numericMatch[1].trim();
+        if (id.length >= 4 && id.length <= 6) {
+            console.log(`✅ Found numeric ID: ${id}`);
+            return id;
+        }
+    }
+    
+    // Pattern 6: TXIX format
     const txixMatch = text.match(/(TXIX[0-9]+)/i);
     if (txixMatch) {
         let id = txixMatch[1].trim();
@@ -211,34 +222,13 @@ function extractEmpId(text) {
         }
     }
     
-    // Pattern 6: T1UB format
+    // Pattern 7: T1UB format
     const t1ubMatch = text.match(/(T1UB[0-9]+)/i);
     if (t1ubMatch) {
         let id = t1ubMatch[1].trim();
         id = id.replace(/[^A-Z0-9]/g, '');
         if (id.length >= 4) {
             console.log(`✅ Found T1UB ID: ${id}`);
-            return id;
-        }
-    }
-    
-    // Pattern 7: Standalone number (like "12095" from your PDF)
-    const numericMatch = text.match(/\b([0-9]{4,6})\b/);
-    if (numericMatch) {
-        const id = numericMatch[1].trim();
-        if (id.length >= 4 && id.length <= 6) {
-            console.log(`✅ Found numeric ID: ${id}`);
-            return id;
-        }
-    }
-    
-    // Pattern 8: Fallback - any alphanumeric that looks like an ID
-    const fallbackMatch = text.match(/\b([A-Z]{2,4}[0-9]{4,6})\b/);
-    if (fallbackMatch) {
-        let id = fallbackMatch[1].trim();
-        id = id.replace(/[^A-Z0-9]/g, '');
-        if (id.length >= 4) {
-            console.log(`✅ Found fallback ID: ${id}`);
             return id;
         }
     }
@@ -279,7 +269,7 @@ function extractName(text) {
 }
 
 // ============================================
-// FIND EMPLOYEE - Match by ID
+// FIND EMPLOYEE - Match by numeric part
 // ============================================
 
 function findEmployee(empId) {
@@ -323,6 +313,8 @@ app.post('/api/admin/login', (req, res) => {
                 message: 'Password is required' 
             });
         }
+        
+        console.log('🔐 Password received, checking...');
         
         if (password === ADMIN_PASSWORD) {
             const expiry = Date.now() + (24 * 60 * 60 * 1000);
@@ -456,6 +448,7 @@ app.get('/health', async (req, res) => {
     }
 });
 
+// Serve index.html
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
@@ -464,6 +457,7 @@ app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+// Error handling
 app.use((err, req, res, next) => {
     console.error('❌ Server error:', err);
     res.status(500).json({ error: 'Internal server error' });

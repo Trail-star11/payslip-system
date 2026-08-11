@@ -6,7 +6,7 @@
     <title>My Payslip Download</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
     <style>
-        /* [Same CSS as before - keeping it compact] */
+        /* [Same CSS as before] */
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Roboto, system-ui, sans-serif; }
         body { background: #f4f7fc; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 1.5rem; }
         .app-container { max-width: 1200px; width: 100%; }
@@ -215,7 +215,7 @@
             <div id="adminStatus" class="status-box"><i class="fas fa-info-circle"></i> Upload CSV and PDF files to get started.</div>
         </div>
 
-        <!-- ⭐ NEW: Missing Payslips Log -->
+        <!-- Missing Payslips Log -->
         <div style="margin-top: 1.5rem;">
             <div class="flex-between">
                 <h3 style="font-size: 1.1rem;"><i class="fas fa-clipboard-list" style="color: #f59e0b;"></i> Missing Payslips Log</h3>
@@ -265,7 +265,7 @@
 
         <div class="form-group">
             <label><i class="fas fa-id-badge"></i> Employee ID</label>
-            <input type="text" id="userEmpId" placeholder="e.g. PPRR********" />
+            <input type="text" id="userEmpId" placeholder="e.g. 12095 or PPRR12095" />
         </div>
         <div class="form-group">
             <label><i class="fas fa-lock"></i> Password</label>
@@ -364,7 +364,7 @@
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
 
     // ============================================
-    // EXTRACT EMPLOYEE ID - KEEP AS FOUND
+    // EXTRACT FUNCTIONS
     // ============================================
 
     function extractEmpId(text) {
@@ -520,7 +520,7 @@
     }
 
     // ============================================
-    // ⭐ NEW: TRACK DOWNLOAD
+    // DOWNLOAD TRACKING
     // ============================================
 
     async function trackDownload(empId) {
@@ -542,7 +542,7 @@
     }
 
     // ============================================
-    // ⭐ NEW: GET MISSING PAYSLIPS LOG
+    // ⭐ FIXED: MISSING PAYSLIPS LOG
     // ============================================
 
     async function loadMissingLog() {
@@ -557,7 +557,7 @@
     }
 
     function renderMissingLog(data) {
-        if (!data || !data.missingEmployees) {
+        if (!data || !data.pdfStats) {
             missingLogContainer.innerHTML = '<p style="color: #94a3b8; text-align: center; padding: 0.5rem;">No data available</p>';
             return;
         }
@@ -565,36 +565,45 @@
         let html = '';
         
         // Summary
+        const missingCount = data.totalEmployees - data.totalWithPayslip;
         html += `<div style="padding: 0.5rem; background: #f1f5f9; border-radius: 8px; margin-bottom: 0.5rem;">
-            <strong>Summary:</strong> ${data.totalEmployees} total employees, ${data.totalWithPayslip} with payslips, <span style="color: #dc2626;">${data.missingEmployees.length} missing</span>
+            <strong>Summary:</strong> ${data.totalEmployees} total employees, ${data.totalWithPayslip} with payslips, <span style="color: ${missingCount === 0 ? '#16a34a' : '#dc2626'};">${missingCount} missing</span>
         </div>`;
 
-        // PDF Summary
-        if (data.pdfSummary && data.pdfSummary.length > 0) {
+        // ⭐ FIXED: PDF Status - Correct per-PDF counts
+        if (data.pdfStats && data.pdfStats.length > 0) {
             html += `<div style="font-size: 0.8rem; padding: 0.3rem 0.5rem; color: #475569;">
-                <strong>PDF Status:</strong>`;
-            data.pdfSummary.forEach(pdf => {
-                const status = pdf.missingInPdf === 0 ? '✅ Complete' : `⚠️ ${pdf.missingInPdf} missing`;
-                html += `<div style="padding: 0.2rem 0;">📄 ${pdf.pdfName}: ${pdf.foundInPdf}/${pdf.totalEmployees} found (${status})</div>`;
+                <strong>PDF Status (per file):</strong>`;
+            data.pdfStats.forEach(pdf => {
+                // Each PDF shows its own correct count
+                const isComplete = pdf.missing === 0;
+                const status = isComplete ? '✅ Complete' : `⚠️ ${pdf.missing} missing`;
+                html += `<div style="padding: 0.2rem 0; display: flex; justify-content: space-between; align-items: center;">
+                    <span>📄 ${pdf.pdfName}</span>
+                    <span style="${isComplete ? 'color: #16a34a;' : 'color: #f59e0b;'}">${pdf.found}/${pdf.totalEmployeesOverall} found (${status})</span>
+                </div>`;
             });
             html += `</div>`;
         }
 
-        // Missing employees list
-        if (data.missingEmployees.length > 0) {
+        // Missing employees list (only if there are truly missing ones)
+        if (data.missingEmployees && data.missingEmployees.length > 0) {
             html += `<div style="font-weight: 600; padding: 0.3rem 0.5rem; color: #dc2626;">
-                ⚠️ Missing Payslips (${data.missingEmployees.length}):
+                ⚠️ Employees WITHOUT any payslip (${data.missingEmployees.length}):
             </div>`;
-            data.missingEmployees.forEach(emp => {
+            data.missingEmployees.slice(0, 20).forEach(emp => {
                 html += `<div class="missing-log-item">
                     <span class="emp-id">${emp.empId}</span>
                     <span>${emp.name || 'N/A'}</span>
-                    <span class="status" style="color: #dc2626;">❌ No PDF</span>
+                    <span class="status" style="color: #dc2626;">❌ No PDF assigned</span>
                 </div>`;
             });
+            if (data.missingEmployees.length > 20) {
+                html += `<div style="padding: 0.3rem 0.5rem; color: #94a3b8; text-align: center;">... and ${data.missingEmployees.length - 20} more</div>`;
+            }
         } else {
             html += `<div style="padding: 0.5rem; color: #16a34a; text-align: center;">
-                ✅ All employees have payslips assigned!
+                ✅ All ${data.totalEmployees} employees have payslips assigned!
             </div>`;
         }
 
@@ -634,12 +643,10 @@
                         }
                     }
                 }
-                if (!manualTestModeOverride && !isTestModeChanging) {
-                    if (data.settings && data.settings.testMode !== undefined) {
-                        testModeToggle.checked = data.settings.testMode;
-                        lastTestModeState = data.settings.testMode;
-                        updateTestModeStatus();
-                    }
+                // ⭐ FIXED: NO AUTO TEST MODE SYNC - Admin has full control
+                if (data.settings && data.settings.testMode !== undefined && !manualTestModeOverride) {
+                    testModeToggle.checked = data.settings.testMode;
+                    updateTestModeStatus();
                 }
                 renderEmployeeList();
                 dataLoaded = true;
@@ -718,10 +725,8 @@
         if (autoRefreshInterval) clearInterval(autoRefreshInterval);
         autoRefreshInterval = setInterval(async () => {
             if (document.hidden) return;
-            if (!isTestModeChanging) {
-                await loadDataFromServer();
-            }
-        }, 5000); // Check every 5 seconds
+            await loadDataFromServer();
+        }, 5000);
     }
 
     // ============================================
@@ -882,9 +887,10 @@
         let html = `<table class="employee-table"><thead><tr><th>Emp ID</th><th>Name</th><th>PDF Found</th><th>Password</th><th>⬇️ Downloads</th></tr></thead><tbody>`;
         employeeData.forEach(emp => {
             const hasPdf = emp.pageNumber && emp.pdfFile && pdfDataStore[emp.pdfFile];
+            // ⭐ FIXED: Show PDF filename with page number
             const pdfStatus = hasPdf ? 
-                `<span class="badge badge-page">✅ Page ${emp.pageNumber}</span>` : 
-                emp.pageNumber ? `<span class="badge badge-not-found">⚠️ PDF not loaded</span>` :
+                `<span class="badge badge-page">✅ ${emp.pdfFile} (Page ${emp.pageNumber})</span>` : 
+                emp.pageNumber ? `<span class="badge badge-not-found">⚠️ PDF not loaded (${emp.pdfFile || 'unknown'})</span>` :
                 `<span class="badge badge-not-found">❌ Not found</span>`;
             const passStatus = emp.password && emp.password.length > 0 ? 
                 `<span class="badge badge-pass-yes">✅ Available</span>` : 
@@ -1136,7 +1142,6 @@
     $('refreshDataBtn').addEventListener('click', async function() {
         if (!adminUnlocked) { lockAdmin(); return; }
         manualTestModeOverride = false;
-        isTestModeChanging = false;
         await loadDataFromServer(true);
         await loadMissingLog();
         setAdminMsg('🔄 Data refreshed from server.', 'success');
@@ -1221,76 +1226,34 @@
     });
 
     // ============================================
-    // TEST MODE SYNC - IMMEDIATE
-    // ============================================
-
-    let testModeSyncInterval = null;
-    let lastTestModeState = false;
-
-    async function syncTestModeFromServer() {
-        try {
-            const response = await fetch('/api/data');
-            const data = await response.json();
-            if (data && data.settings && data.settings.testMode !== undefined) {
-                const serverTestMode = data.settings.testMode;
-                if (serverTestMode !== lastTestModeState) {
-                    console.log(`🔄 Test mode changed on server: ${serverTestMode ? 'ON' : 'OFF'}`);
-                    lastTestModeState = serverTestMode;
-                    const wasChanging = isTestModeChanging;
-                    isTestModeChanging = true;
-                    testModeToggle.checked = serverTestMode;
-                    updateTestModeStatus();
-                    if (adminUnlocked) {
-                        setAdminMsg(`🔬 Test Mode ${serverTestMode ? 'ENABLED' : 'DISABLED'} (Updated from server)`, serverTestMode ? 'warning' : '');
-                    } else {
-                        setUserMsg(`🔬 Test Mode ${serverTestMode ? 'ENABLED' : 'DISABLED'} by Admin`, serverTestMode ? 'warning' : '');
-                    }
-                    payslipArea.classList.remove('show');
-                    if (!serverTestMode) dummyPasswordDisplay.classList.remove('show');
-                    isTestModeChanging = wasChanging;
-                }
-                lastTestModeState = serverTestMode;
-            }
-        } catch (error) {
-            console.log('⚠️ Test mode sync failed:', error.message);
-        }
-    }
-
-    function startTestModeSync() {
-        if (testModeSyncInterval) clearInterval(testModeSyncInterval);
-        testModeSyncInterval = setInterval(() => {
-            if (!isTestModeChanging && !document.hidden) {
-                syncTestModeFromServer();
-            }
-        }, 1500); // Check every 1.5 seconds for faster sync
-    }
-
-    // ============================================
-    // TEST MODE TOGGLE
+    // ⭐ FIXED: TEST MODE - FULL ADMIN CONTROL (NO AUTO-SYNC)
     // ============================================
 
     testModeToggle.addEventListener('change', function() {
-        if (!adminUnlocked) { lockAdmin(); return; }
+        if (!adminUnlocked) { 
+            lockAdmin(); 
+            return; 
+        }
         isTestModeChanging = true;
         manualTestModeOverride = true;
         const newState = testModeToggle.checked;
-        lastTestModeState = newState;
         updateTestModeStatus();
         payslipArea.classList.remove('show');
         if (newState) {
             showDummyPassword();
-            setAdminMsg(`🔬 Test Mode ENABLED`, 'warning');
+            setAdminMsg(`🔬 Test Mode ENABLED - Admin controlled`, 'warning');
         } else {
             dummyPasswordDisplay.classList.remove('show');
-            setAdminMsg(`🔒 Test Mode DISABLED`, '');
+            setAdminMsg(`🔒 Test Mode DISABLED - Admin controlled`, '');
         }
+        // Save the setting to server
         saveDataToServer(employeeData, null, { testMode: newState });
-        // Also trigger immediate sync for other devices
         setTimeout(() => {
             isTestModeChanging = false;
-            syncTestModeFromServer();
-        }, 300);
+        }, 500);
     });
+
+    // ⭐ REMOVED: Auto-sync for test mode - Admin has full control
 
     // ============================================
     // USER LOGIN
@@ -1342,8 +1305,6 @@
 
         payslipEmpName.textContent = user.name || user.empId;
         payslipEmpIdSpan.textContent = user.empId;
-        
-        // Show download count
         const count = user.downloadCount || 0;
         downloadStats.textContent = `⬇️ Downloads: ${count}`;
 
@@ -1378,7 +1339,7 @@
     }
 
     // ============================================
-    // ⭐ DOWNLOAD PDF - WITH TRACKING
+    // DOWNLOAD PDF - WITH TRACKING
     // ============================================
 
     downloadBtn.addEventListener('click', async function() {
@@ -1386,12 +1347,10 @@
         const pdfName = payslipArea.dataset.pdfName || 'payslip.pdf';
         if (!pdfBlobUrl) { setUserMsg('No PDF available to download.', 'error'); return; }
         try {
-            // Track the download
             const empId = currentUser ? currentUser.empId : null;
             if (empId) {
                 const newCount = await trackDownload(empId);
                 if (newCount !== null) {
-                    // Update the employee data
                     const emp = employeeData.find(e => e.empId === empId || e.empId.replace(/^[A-Z]+/, '') === empId.replace(/^[A-Z]+/, ''));
                     if (emp) {
                         emp.downloadCount = newCount;
@@ -1400,7 +1359,6 @@
                     }
                 }
             }
-            
             const link = document.createElement('a');
             link.href = pdfBlobUrl;
             link.download = pdfName;
@@ -1424,7 +1382,7 @@
         const emp = findEmployee(empId);
         if (!emp) { setUserMsg(`No record for ${empId}`, 'error'); return; }
         const hasPdf = emp.pageNumber && emp.pdfFile && pdfDataStore[emp.pdfFile];
-        const pdfStatus = hasPdf ? `✅ Page ${emp.pageNumber}` : '❌ No PDF';
+        const pdfStatus = hasPdf ? `✅ ${emp.pdfFile} (Page ${emp.pageNumber})` : '❌ No PDF';
         const hasPass = emp.password ? '✅ Set' : '❌ Not set';
         const downloads = emp.downloadCount || 0;
         setUserMsg(`✅ Found: ${emp.name || emp.empId} | Password: ${hasPass} | PDF: ${pdfStatus} | ⬇️ Downloads: ${downloads}`, 'success');
@@ -1482,7 +1440,7 @@
         await loadDataFromServer(true);
         if (adminUnlocked) await loadMissingLog();
         
-        lastTestModeState = testModeToggle.checked;
+        // ⭐ FIXED: No auto-sync, respect current toggle state
         if (!testModeToggle.checked) {
             testModeToggle.checked = false;
             updateTestModeStatus();
@@ -1492,18 +1450,13 @@
         setUserMsg('Enter Employee ID and password to download payslip.');
         
         startAutoRefresh();
-        startTestModeSync();
         
         console.log('📄 Multi-device payslip system running.');
         console.log(`📊 ${employeeData.length} employees`);
         console.log(`📄 ${Object.keys(pdfDataStore).length} PDFs`);
-        console.log(`🔒 Test Mode: ${testModeToggle.checked ? 'ON' : 'OFF'}`);
-        console.log(`🔄 Test Mode Sync: Enabled (checks every 1.5 seconds)`);
+        console.log(`🔒 Test Mode: ${testModeToggle.checked ? 'ON' : 'OFF'} (Admin controlled)`);
         console.log(`⬇️ Download tracking: Enabled`);
-        
-        document.addEventListener('visibilitychange', function() {
-            if (!document.hidden) syncTestModeFromServer();
-        });
+        console.log(`🔐 Admin auth: Server-side (secure)`);
     }
 
     userTabBtn.classList.add('active');

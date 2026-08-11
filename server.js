@@ -24,13 +24,12 @@ console.log('🚀 Starting server...');
 console.log('🔒 Admin password is set from environment variables');
 
 // ============================================
-// MIDDLEWARE - MUST come BEFORE routes
+// MIDDLEWARE
 // ============================================
 
 app.use(express.json({ limit: '500mb' }));
 app.use(express.urlencoded({ extended: true, limit: '500mb' }));
 
-// CORS middleware
 app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
     res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -41,7 +40,6 @@ app.use((req, res, next) => {
     next();
 });
 
-// Serve static files
 app.use(express.static('public'));
 
 // ============================================
@@ -155,16 +153,14 @@ async function initializeData() {
 }
 
 // ============================================
-// EXTRACTION FUNCTIONS - KEEP ID AS FOUND
+// EXTRACTION FUNCTIONS
 // ============================================
 
 function extractEmpId(text) {
     const empCodeMatch = text.match(/Emp\s*Code[:.\s]*([0-9]{4,6})/i);
     if (empCodeMatch) {
         const id = empCodeMatch[1].trim();
-        if (id.length >= 4 && id.length <= 6) {
-            return id;
-        }
+        if (id.length >= 4 && id.length <= 6) return id;
     }
     
     const empCodePprrMatch = text.match(/Emp\s*Code[:.\s]*(PPRR[0-9]+)/i);
@@ -265,39 +261,21 @@ function findEmployee(empId) {
 
 app.post('/api/admin/login', (req, res) => {
     try {
-        console.log('🔐 Admin login request received');
         const password = req.body && req.body.password ? req.body.password : null;
-        
         if (!password) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Password is required' 
-            });
+            return res.status(400).json({ success: false, message: 'Password is required' });
         }
-        
         if (password === ADMIN_PASSWORD) {
             const expiry = Date.now() + (24 * 60 * 60 * 1000);
             const tokenData = `${expiry}:${password}`;
             const token = Buffer.from(tokenData).toString('base64');
-            
-            res.json({ 
-                success: true, 
-                token: token,
-                message: 'Login successful',
-                expiresIn: '24 hours'
-            });
+            res.json({ success: true, token: token, message: 'Login successful', expiresIn: '24 hours' });
         } else {
-            res.status(401).json({ 
-                success: false, 
-                message: 'Invalid password' 
-            });
+            res.status(401).json({ success: false, message: 'Invalid password' });
         }
     } catch (error) {
         console.error('❌ Login error:', error);
-        res.status(500).json({ 
-            success: false, 
-            message: 'Server error: ' + error.message 
-        });
+        res.status(500).json({ success: false, message: 'Server error: ' + error.message });
     }
 });
 
@@ -327,7 +305,7 @@ app.post('/api/admin/verify', (req, res) => {
 });
 
 // ============================================
-// ⭐ NEW: DOWNLOAD TRACKING
+// DOWNLOAD TRACKING
 // ============================================
 
 app.post('/api/track-download', async (req, res) => {
@@ -337,13 +315,11 @@ app.post('/api/track-download', async (req, res) => {
             return res.status(400).json({ error: 'Employee ID required' });
         }
         
-        // Get current data
         const data = await loadDataFromMongoDB();
         if (!data || !data.employees) {
             return res.status(404).json({ error: 'No data found' });
         }
         
-        // Find and update the employee
         const employee = data.employees.find(e => e.empId === empId || 
             e.empId.replace(/^[A-Z]+/, '') === empId.replace(/^[A-Z]+/, ''));
         
@@ -351,11 +327,9 @@ app.post('/api/track-download', async (req, res) => {
             return res.status(404).json({ error: 'Employee not found' });
         }
         
-        // Increment download count
         employee.downloadCount = (employee.downloadCount || 0) + 1;
         employee.lastDownload = new Date().toISOString();
         
-        // Save back to MongoDB
         await saveDataToMongoDB(data);
         
         res.json({ 
@@ -370,7 +344,7 @@ app.post('/api/track-download', async (req, res) => {
 });
 
 // ============================================
-// ⭐ NEW: GET MISSING EMPLOYEES LOG
+// ⭐ FIXED: GET MISSING PAYSLIPS LOG
 // ============================================
 
 app.get('/api/missing-payslips', async (req, res) => {
@@ -383,39 +357,44 @@ app.get('/api/missing-payslips', async (req, res) => {
         // Get all PDF filenames
         const pdfFiles = data.pdfs ? Object.keys(data.pdfs) : [];
         
-        // Find employees without payslips
-        const missingEmployees = data.employees.filter(emp => {
-            return !emp.pageNumber || !emp.pdfFile || !pdfFiles.includes(emp.pdfFile);
-        });
-        
-        // Group by PDF file to show which employees are missing from which PDF
-        const pdfSummary = pdfFiles.map(pdfName => {
-            const employeesInPdf = data.employees.filter(emp => 
+        // Count employees per PDF file
+        const pdfStats = pdfFiles.map(pdfName => {
+            // Employees found in this PDF
+            const foundInPdf = data.employees.filter(emp => 
                 emp.pdfFile === pdfName && emp.pageNumber
             );
-            const employeesMissing = data.employees.filter(emp => 
-                (!emp.pageNumber || !emp.pdfFile || emp.pdfFile !== pdfName) && 
-                !data.employees.some(e => e.empId === emp.empId && e.pdfFile === pdfName && e.pageNumber)
+            
+            // Employees NOT found in this PDF (but exist in other PDFs or no PDF)
+            const notFoundInPdf = data.employees.filter(emp => 
+                emp.pdfFile !== pdfName || !emp.pageNumber
             );
+            
             return {
                 pdfName: pdfName,
-                totalEmployees: data.employees.length,
-                foundInPdf: employeesInPdf.length,
-                missingInPdf: data.employees.length - employeesInPdf.length,
-                sampleMissing: employeesMissing.slice(0, 10).map(e => e.empId)
+                totalEmployeesInPdf: foundInPdf.length,
+                totalEmployeesOverall: data.employees.length,
+                found: foundInPdf.length,
+                missing: data.employees.length - foundInPdf.length,
+                sampleFound: foundInPdf.slice(0, 5).map(e => e.empId),
+                sampleMissing: notFoundInPdf.slice(0, 5).map(e => e.empId)
             };
+        });
+        
+        // Find employees without ANY payslip
+        const missingEmployees = data.employees.filter(emp => {
+            return !emp.pageNumber || !emp.pdfFile || !pdfFiles.includes(emp.pdfFile);
         });
         
         res.json({
             totalEmployees: data.employees.length,
             totalWithPayslip: data.employees.filter(e => e.pageNumber && e.pdfFile && pdfFiles.includes(e.pdfFile)).length,
+            pdfStats: pdfStats,
             missingEmployees: missingEmployees.map(e => ({
                 empId: e.empId,
                 name: e.name,
                 pageNumber: e.pageNumber || 'Not found',
                 pdfFile: e.pdfFile || 'Not assigned'
-            })),
-            pdfSummary: pdfSummary
+            }))
         });
     } catch (error) {
         console.error('❌ Missing payslips error:', error);
@@ -497,7 +476,6 @@ app.get('/health', async (req, res) => {
     }
 });
 
-// Serve index.html
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
@@ -506,7 +484,6 @@ app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Error handling
 app.use((err, req, res, next) => {
     console.error('❌ Server error:', err);
     res.status(500).json({ error: 'Internal server error' });
@@ -543,7 +520,6 @@ async function startServer() {
         console.log(`📄 PDFs: ${dataCache.pdfs ? Object.keys(dataCache.pdfs).length : 0}`);
         console.log(`🔒 Test Mode: ${dataCache.settings?.testMode ? 'ON' : 'OFF'}`);
         console.log(`💾 Storage: ${connected ? 'MongoDB Atlas (Free) ✅' : 'Local (ephemeral) ⚠️'}`);
-        console.log(`🔐 Admin auth: Server-side (secure)`);
         console.log(`🌐 URL: http://localhost:${PORT}`);
     });
 }

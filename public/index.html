@@ -330,7 +330,7 @@
 
         <div class="form-group">
             <label><i class="fas fa-id-badge"></i> Employee ID</label>
-            <input type="text" id="userEmpId" placeholder="e.g. PPRR0******** or TXIX*****" />
+            <input type="text" id="userEmpId" placeholder="e.g. PPRR0********" />
         </div>
         <div class="form-group">
             <label><i class="fas fa-lock"></i> Password</label>
@@ -425,142 +425,130 @@
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
 
     // ============================================
-    // ⭐ FIXED: EXTRACT EMPLOYEE ID - Handles PPRR, TXIX, numeric formats
+    // ⭐ RAW PDF TEXT EXTRACTION - FALLBACK METHOD
     // ============================================
 
-    function extractEmpId(text) {
-        // PPRR pattern (your most common format)
-        const pprrMatch = text.match(/(PPRR[A-Z0-9]+)/i);
-        if (pprrMatch) {
-            let id = pprrMatch[1].trim().toUpperCase();
-            if (id.length >= 4 && id.startsWith('PPRR')) {
-                console.log(`✅ Found PPRR ID: ${id}`);
-                return id;
-            }
-        }
-        
-        // Emp Code with PPRR
-        const empCodeMatch = text.match(/Emp Code[:.\s]*(PPRR[A-Z0-9]+)/i);
-        if (empCodeMatch) {
-            let id = empCodeMatch[1].trim().toUpperCase();
-            if (id.length >= 4) {
-                console.log(`✅ Found Emp Code: ${id}`);
-                return id;
-            }
-        }
-        
-        // Employee Code with PPRR
-        const employeeCodeMatch = text.match(/Employee Code[:.\s]*(PPRR[A-Z0-9]+)/i);
-        if (employeeCodeMatch) {
-            let id = employeeCodeMatch[1].trim().toUpperCase();
-            if (id.length >= 4) {
-                console.log(`✅ Found Employee Code: ${id}`);
-                return id;
-            }
-        }
-        
-        // Generic PPRR pattern
-        const genericMatch = text.match(/\b(PPRR[A-Z0-9]+)\b/i);
-        if (genericMatch) {
-            let id = genericMatch[1].trim().toUpperCase();
-            if (id.length >= 4) {
-                console.log(`✅ Found PPRR (generic): ${id}`);
-                return id;
-            }
-        }
-        
-        // TXIX format (older format)
-        const txixMatch = text.match(/(TXIX[A-Z0-9]+)/i);
-        if (txixMatch) {
-            let id = txixMatch[1].trim().toUpperCase();
-            if (id.length >= 4) {
-                console.log(`✅ Found TXIX ID: ${id}`);
-                return id;
-            }
-        }
-        
-        // T1UB format
-        const t1ubMatch = text.match(/(T1UB[A-Z0-9]+)/i);
-        if (t1ubMatch) {
-            let id = t1ubMatch[1].trim().toUpperCase();
-            if (id.length >= 4) {
-                console.log(`✅ Found T1UB ID: ${id}`);
-                return id;
-            }
-        }
-        
-        // Numeric-only Emp Code (convert to PPRR)
-        const numericMatch = text.match(/Emp Code[:.\s]*([0-9]{4,6})/i);
-        if (numericMatch) {
-            let num = numericMatch[1].trim();
-            if (num.length >= 4 && num.length <= 6) {
-                // Check if this numeric ID exists in our data with any prefix
-                if (employeeData && employeeData.length > 0) {
-                    for (const emp of employeeData) {
-                        const empNumeric = emp.empId.toUpperCase().replace(/^[A-Z]+/, '');
-                        if (empNumeric === num) {
-                            console.log(`✅ Matched numeric ID ${num} to existing employee ${emp.empId}`);
-                            return emp.empId.toUpperCase();
+    function extractRawTextFromPdfBytes(pdfBytes) {
+        try {
+            // Convert bytes to text using UTF-8 decoder
+            const decoder = new TextDecoder('utf-8', { fatal: false });
+            const text = decoder.decode(pdfBytes);
+            
+            // Look for employee IDs in raw data
+            const ids = [];
+            const idPatterns = [
+                /Emp\s*Code\s*(\d{4,6})/gi,
+                /Emp\s*Code\s*(PPRR\d+)/gi,
+                /Emp\s*Code\s*(TXIX\d+)/gi,
+                /Emp\s*Code\s*(T1UB\d+)/gi,
+                /PPRR(\d{4,6})/gi,
+                /TXIX(\d{4,6})/gi,
+                /T1UB(\d{4,6})/gi,
+                /PPRR[A-Z0-9]+/gi,
+                /TXIX[A-Z0-9]+/gi,
+                /T1UB[A-Z0-9]+/gi,
+            ];
+            
+            for (const pattern of idPatterns) {
+                let match;
+                while ((match = pattern.exec(text)) !== null) {
+                    let id = match[1] ? match[1].trim() : match[0].trim();
+                    if (/^\d+$/.test(id) && id.length >= 4 && id.length <= 6) {
+                        // Numeric ID - convert to PPRR
+                        const pprrId = `PPRR${id}`;
+                        if (!ids.includes(pprrId)) {
+                            ids.push(pprrId);
+                        }
+                    } else if (id.length >= 4) {
+                        id = id.replace(/[^A-Z0-9]/g, '');
+                        if (id.length >= 4 && !ids.includes(id)) {
+                            ids.push(id);
                         }
                     }
                 }
-                console.log(`⚠️ Converting numeric ID ${num} to PPRR${num}`);
-                return `PPRR${num}`;
             }
-        }
-        
-        // Fallback
-        const fallbackMatch = text.match(/\b([A-Z]{2,4}[0-9]{4,6})\b/);
-        if (fallbackMatch) {
-            let id = fallbackMatch[1].trim().toUpperCase();
-            id = id.replace(/[^A-Z0-9]/g, '');
-            if (id.length >= 4 && /[A-Z]/.test(id) && /[0-9]/.test(id)) {
-                console.log(`✅ Found fallback ID: ${id}`);
-                return id;
+            
+            // Look for names
+            const names = [];
+            const namePattern = /Name\s+of\s+the\s+Employee\s*([A-Z\s]+?)(?=\s+No\s+of\s+Days|$)/gi;
+            let nameMatch;
+            while ((nameMatch = namePattern.exec(text)) !== null) {
+                let name = nameMatch[1].trim();
+                name = name.replace(/[^A-Za-z\s\.]/g, '');
+                if (name.length > 2 && !names.includes(name)) {
+                    names.push(name);
+                }
             }
+            
+            return { ids, names, rawText: text };
+        } catch (error) {
+            console.error('❌ Raw extraction error:', error.message);
+            return { ids: [], names: [], rawText: '' };
         }
-        
-        console.log(`❌ No ID found in text`);
-        return null;
     }
 
     // ============================================
-    // ⭐ FIXED: FIND EMPLOYEE - Matches by numeric part
+    // EXTRACT EMPLOYEE ID - Enhanced with raw fallback
     // ============================================
 
-    function findEmployee(empId) {
-        if (!empId) return null;
+    function extractEmpId(text, rawText = '') {
+        // First try standard extraction from text
+        const patterns = [
+            /(PPRR[A-Z0-9]+)/i,
+            /Emp Code[:.\s]*(PPRR[A-Z0-9]+)/i,
+            /Emp Code[:.\s]*([A-Z0-9\/]+)/i,
+            /Employee Code[:.\s]*(PPRR[A-Z0-9]+)/i,
+            /(TXIX[A-Z0-9]+)/i,
+            /(T1UB[A-Z0-9]+)/i,
+            /Emp Code[:.\s]*([0-9]{4,6})/i,
+            /\b([A-Z]{2,4}[0-9]{4,6})\b/i,
+        ];
         
-        empId = empId.toUpperCase().trim();
-        
-        // Extract numeric part (e.g., "11906" from "PPRR11906" or "TXIX11906")
-        const numericPart = empId.replace(/^[A-Z]+/, '');
-        
-        // 1. Try exact match first
-        let found = employeeData.find(e => e.empId.toUpperCase() === empId);
-        if (found) return found;
-        
-        // 2. Try matching by numeric part (TXIX11906 vs PPRR11906)
-        found = employeeData.find(e => {
-            const eNumeric = e.empId.toUpperCase().replace(/^[A-Z]+/, '');
-            return eNumeric === numericPart;
-        });
-        if (found) {
-            console.log(`✅ Matched ${empId} to ${found.empId} by numeric part`);
-            return found;
+        for (const pattern of patterns) {
+            const match = text.match(pattern);
+            if (match) {
+                let id = match[1].trim().toUpperCase();
+                id = id.replace(/[^A-Z0-9]/g, '');
+                
+                // If it's just a number, convert to PPRR
+                if (/^\d+$/.test(id) && id.length >= 4 && id.length <= 6) {
+                    // Check if this numeric ID exists in our data
+                    if (employeeData && employeeData.length > 0) {
+                        for (const emp of employeeData) {
+                            const empNumeric = emp.empId.toUpperCase().replace(/^[A-Z]+/, '');
+                            if (empNumeric === id) {
+                                console.log(`✅ Matched numeric ID ${id} to existing employee ${emp.empId}`);
+                                return emp.empId.toUpperCase();
+                            }
+                        }
+                    }
+                    const pprrId = `PPRR${id}`;
+                    console.log(`⚠️ Converting numeric ID ${id} to ${pprrId}`);
+                    return pprrId;
+                }
+                
+                if (id.length >= 4) {
+                    console.log(`✅ Found ID: ${id}`);
+                    return id;
+                }
+            }
         }
         
-        // 3. Try partial match
-        found = employeeData.find(e => {
-            const eId = e.empId.toUpperCase();
-            const eNumeric = eId.replace(/^[A-Z]+/, '');
-            return eNumeric.includes(numericPart) || numericPart.includes(eNumeric);
-        });
-        if (found) {
-            console.log(`✅ Matched ${empId} to ${found.empId} by partial match`);
-            return found;
+        // If no ID found in text, try raw extraction
+        if (rawText) {
+            const rawResult = extractRawTextFromPdfBytes(new TextEncoder().encode(rawText));
+            if (rawResult.ids.length > 0) {
+                // Return the first valid ID
+                for (const id of rawResult.ids) {
+                    if (id.length >= 4) {
+                        console.log(`✅ Found ID from raw extraction: ${id}`);
+                        return id;
+                    }
+                }
+            }
         }
         
+        console.log(`❌ No ID found`);
         return null;
     }
 
@@ -605,6 +593,44 @@
                 return null;
             }
             return name;
+        }
+        
+        return null;
+    }
+
+    // ============================================
+    // FIND EMPLOYEE - Matches by numeric part
+    // ============================================
+
+    function findEmployee(empId) {
+        if (!empId) return null;
+        
+        empId = empId.toUpperCase().trim();
+        const numericPart = empId.replace(/^[A-Z]+/, '');
+        
+        // 1. Try exact match
+        let found = employeeData.find(e => e.empId.toUpperCase() === empId);
+        if (found) return found;
+        
+        // 2. Match by numeric part
+        found = employeeData.find(e => {
+            const eNumeric = e.empId.toUpperCase().replace(/^[A-Z]+/, '');
+            return eNumeric === numericPart;
+        });
+        if (found) {
+            console.log(`✅ Matched ${empId} to ${found.empId} by numeric part`);
+            return found;
+        }
+        
+        // 3. Partial match
+        found = employeeData.find(e => {
+            const eId = e.empId.toUpperCase();
+            const eNumeric = eId.replace(/^[A-Z]+/, '');
+            return eNumeric.includes(numericPart) || numericPart.includes(eNumeric);
+        });
+        if (found) {
+            console.log(`✅ Matched ${empId} to ${found.empId} by partial match`);
+            return found;
         }
         
         return null;
@@ -852,8 +878,6 @@
 
     adminUnlockBtn.addEventListener('click', async function() {
         const pass = adminPasswordInput.value.trim();
-        console.log('🔐 Unlock button clicked');
-        console.log('📝 Password length:', pass ? pass.length : 0);
         
         if (!pass) {
             adminLockError.textContent = 'Please enter the admin password.';
@@ -865,8 +889,6 @@
         adminUnlockBtn.textContent = '⏳ Verifying...';
         
         try {
-            console.log('📤 Sending login request...');
-            
             const response = await fetch('/api/admin/login', {
                 method: 'POST',
                 headers: { 
@@ -875,9 +897,7 @@
                 body: JSON.stringify({ password: pass })
             });
             
-            console.log('📥 Response status:', response.status);
             const result = await response.json();
-            console.log('📥 Response data:', result);
             
             adminUnlockBtn.disabled = false;
             adminUnlockBtn.textContent = 'Unlock';
@@ -1120,40 +1140,136 @@
                     const arrayBuffer = await pdfFile.arrayBuffer();
                     const pdfBytes = new Uint8Array(arrayBuffer);
                     
+                    // Store PDF bytes
                     pdfDataStore[pdfFile.name] = { 
                         bytes: pdfBytes.buffer, 
                         pages: 0 
                     };
 
-                    const pdf = await pdfjsLib.getDocument({ data: pdfBytes }).promise;
-                    const pageCount = pdf.numPages;
-                    pdfDataStore[pdfFile.name].pages = pageCount;
-                    totalPages += pageCount;
-
-                    progressText.textContent = `Scanning ${pdfFile.name} (${pageCount} pages)...`;
-                    for (let i = 1; i <= pageCount; i++) {
-                        const page = await pdf.getPage(i);
-                        const textContent = await page.getTextContent();
-                        const pageText = textContent.items.map(item => item.str).join(' ');
+                    // Try to load PDF with pdf.js
+                    let pdf;
+                    let pageCount = 0;
+                    let pageTexts = [];
+                    let rawText = '';
+                    
+                    try {
+                        pdf = await pdfjsLib.getDocument({ data: pdfBytes }).promise;
+                        pageCount = pdf.numPages;
+                        pdfDataStore[pdfFile.name].pages = pageCount;
+                        totalPages += pageCount;
                         
-                        // Use the updated extractEmpId function
-                        const empId = extractEmpId(pageText);
+                        progressText.textContent = `Scanning ${pdfFile.name} (${pageCount} pages)...`;
                         
-                        if (empId) {
-                            const name = extractName(pageText) || `Employee ${i}`;
-                            allPdfEmployees.push({
-                                empId: empId,
-                                name: name,
-                                pageNumber: i,
-                                pdfFile: pdfFile.name
-                            });
-                            console.log(`✅ Found Employee ID: ${empId} on page ${i} of ${pdfFile.name}`);
+                        for (let i = 1; i <= pageCount; i++) {
+                            try {
+                                const page = await pdf.getPage(i);
+                                const textContent = await page.getTextContent();
+                                const pageText = textContent.items.map(item => item.str).join(' ');
+                                pageTexts.push(pageText);
+                                
+                                // If PDF.js extracted text, use it
+                                if (pageText && pageText.trim().length > 10) {
+                                    // Try to extract ID from the text
+                                    const empId = extractEmpId(pageText);
+                                    if (empId) {
+                                        const name = extractName(pageText) || `Employee ${i}`;
+                                        allPdfEmployees.push({
+                                            empId: empId,
+                                            name: name,
+                                            pageNumber: i,
+                                            pdfFile: pdfFile.name
+                                        });
+                                        console.log(`✅ Found ID: ${empId} on page ${i} of ${pdfFile.name}`);
+                                    }
+                                } else {
+                                    // PDF.js couldn't extract text - use raw extraction
+                                    const rawResult = extractRawTextFromPdfBytes(pdfBytes);
+                                    rawText = rawResult.rawText;
+                                    
+                                    if (rawResult.ids.length > 0) {
+                                        // Find the ID for this page using page boundary markers
+                                        // For each page, look for patterns in raw text
+                                        const pageMarker = `Page ${i}`;
+                                        const pageStart = rawText.indexOf(pageMarker);
+                                        const pageEnd = rawText.indexOf(`Page ${i + 1}`, pageStart);
+                                        const pageRaw = pageEnd > pageStart ? rawText.substring(pageStart, pageEnd) : rawText;
+                                        
+                                        // Look for Emp Code in this page's raw text
+                                        const idMatch = pageRaw.match(/Emp\s*Code\s*(\d{4,6})/i) || pageRaw.match(/(PPRR\d+)/i);
+                                        if (idMatch) {
+                                            let id = idMatch[1] || idMatch[0];
+                                            id = id.trim().toUpperCase();
+                                            if (/^\d+$/.test(id) && id.length >= 4) {
+                                                id = `PPRR${id}`;
+                                            }
+                                            const nameMatch = pageRaw.match(/Name\s+of\s+the\s+Employee\s*([A-Z\s]+?)(?=\s+No\s+of\s+Days|$)/i);
+                                            const name = nameMatch ? nameMatch[1].trim() : `Employee ${i}`;
+                                            
+                                            if (!allPdfEmployees.find(e => e.empId === id && e.pageNumber === i)) {
+                                                allPdfEmployees.push({
+                                                    empId: id,
+                                                    name: name.replace(/[^A-Za-z\s\.]/g, '').trim(),
+                                                    pageNumber: i,
+                                                    pdfFile: pdfFile.name
+                                                });
+                                                console.log(`✅ Found ID from raw: ${id} on page ${i} of ${pdfFile.name}`);
+                                            }
+                                        }
+                                    }
+                                }
+                            } catch (pageError) {
+                                console.log(`⚠️ Page ${i} extraction failed, trying raw...`);
+                                // Fallback to raw extraction for this page
+                                const rawResult = extractRawTextFromPdfBytes(pdfBytes);
+                                const pageRaw = rawResult.rawText;
+                                const idMatch = pageRaw.match(/Emp\s*Code\s*(\d{4,6})/i) || pageRaw.match(/(PPRR\d+)/i);
+                                if (idMatch) {
+                                    let id = idMatch[1] || idMatch[0];
+                                    id = id.trim().toUpperCase();
+                                    if (/^\d+$/.test(id) && id.length >= 4) {
+                                        id = `PPRR${id}`;
+                                    }
+                                    if (!allPdfEmployees.find(e => e.empId === id && e.pageNumber === i)) {
+                                        allPdfEmployees.push({
+                                            empId: id,
+                                            name: `Employee ${i}`,
+                                            pageNumber: i,
+                                            pdfFile: pdfFile.name
+                                        });
+                                        console.log(`✅ Found ID from raw fallback: ${id} on page ${i}`);
+                                    }
+                                }
+                            }
+                            
+                            processedPages++;
+                            const progress = 10 + (processedPages / (totalPages || 1)) * 70;
+                            progressFill.style.width = Math.min(progress, 80) + '%';
+                            progressPercent.textContent = Math.round(Math.min(progress, 80)) + '%';
+                            progressText.textContent = `Scanning ${pdfFile.name} - Page ${i}/${pageCount}...`;
                         }
-                        processedPages++;
-                        const progress = 10 + (processedPages / (totalPages || 1)) * 70;
-                        progressFill.style.width = Math.min(progress, 80) + '%';
-                        progressPercent.textContent = Math.round(Math.min(progress, 80)) + '%';
-                        progressText.textContent = `Scanning ${pdfFile.name} - Page ${i}/${pageCount}...`;
+                    } catch (pdfError) {
+                        console.log(`⚠️ PDF.js failed for ${pdfFile.name}, using raw extraction...`);
+                        // If PDF.js completely fails, use raw extraction for the whole PDF
+                        const rawResult = extractRawTextFromPdfBytes(pdfBytes);
+                        const ids = rawResult.ids;
+                        const names = rawResult.names;
+                        
+                        // We couldn't determine page numbers, so assign sequentially
+                        ids.forEach((id, index) => {
+                            const pageNum = index + 1;
+                            const name = names[index] || `Employee ${pageNum}`;
+                            if (!allPdfEmployees.find(e => e.empId === id)) {
+                                allPdfEmployees.push({
+                                    empId: id,
+                                    name: name,
+                                    pageNumber: pageNum,
+                                    pdfFile: pdfFile.name
+                                });
+                                console.log(`✅ Found ID from raw extraction: ${id} on page ${pageNum}`);
+                            }
+                        });
+                        pdfDataStore[pdfFile.name].pages = ids.length || 1;
+                        totalPages += ids.length || 1;
                     }
                 }
             }
@@ -1165,7 +1281,6 @@
             let mergedData = [];
             if (csvEmployees.length > 0) {
                 mergedData = csvEmployees.map(emp => {
-                    // Find matching employee by numeric part
                     const empNumeric = emp.empId.toUpperCase().replace(/^[A-Z]+/, '');
                     const pdfMatch = allPdfEmployees.find(p => {
                         const pNumeric = p.empId.toUpperCase().replace(/^[A-Z]+/, '');
@@ -1180,7 +1295,6 @@
                     };
                 });
                 
-                // Add PDF-only employees that weren't in CSV
                 allPdfEmployees.forEach(pdfEmp => {
                     const exists = mergedData.some(m => {
                         const mNumeric = m.empId.toUpperCase().replace(/^[A-Z]+/, '');
@@ -1437,7 +1551,6 @@ PPRR13081,SACHIN BAISOYA,sachin!88`;
         if (!empId) { setUserMsg('Please enter Employee ID.', 'error'); return; }
         if (!password) { setUserMsg('Please enter your password.', 'error'); return; }
 
-        // Use the updated findEmployee function
         const emp = findEmployee(empId);
         if (!emp) { setUserMsg(`❌ No employee found with ID: ${empId}`, 'error'); return; }
 
@@ -1634,7 +1747,6 @@ PPRR13081,SACHIN BAISOYA,sachin!88`;
         console.log('🔐 Admin auth: Server-side (secure)');
         console.log('🔑 Admin password is NOT in the code!');
         
-        // ⭐ FIXED: Also sync test mode on visibility change
         document.addEventListener('visibilitychange', function() {
             if (!document.hidden) {
                 syncTestModeFromServer();

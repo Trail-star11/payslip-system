@@ -24,13 +24,12 @@ console.log('🚀 Starting server...');
 console.log('🔒 Admin password is set from environment variables');
 
 // ============================================
-// MIDDLEWARE - MUST come BEFORE routes
+// MIDDLEWARE
 // ============================================
 
 app.use(express.json({ limit: '500mb' }));
 app.use(express.urlencoded({ extended: true, limit: '500mb' }));
 
-// CORS middleware
 app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
     res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -41,7 +40,6 @@ app.use((req, res, next) => {
     next();
 });
 
-// Serve static files
 app.use(express.static('public'));
 
 // ============================================
@@ -155,76 +153,98 @@ async function initializeData() {
 }
 
 // ============================================
-// ⭐ FIXED: RAW TEXT EXTRACTION FROM PDF BYTES
+// ⭐ FIXED: EXTRACTION - KEEP ID AS FOUND
 // ============================================
 
-function extractTextFromPdfBytes(pdfBytes) {
-    try {
-        // Convert bytes to string
-        const decoder = new TextDecoder('utf-8', { fatal: false });
-        const text = decoder.decode(pdfBytes);
-        
-        // Look for Emp Code patterns in raw PDF data
-        const empCodePatterns = [
-            /Emp\s*Code\s*(\d{4,6})/gi,
-            /Emp\s*Code\s*(PPRR\d+)/gi,
-            /Emp\s*Code\s*(TXIX\d+)/gi,
-            /Emp\s*Code\s*(T1UB\d+)/gi,
-            /PPRR(\d{4,6})/gi,
-            /TXIX(\d{4,6})/gi,
-            /T1UB(\d{4,6})/gi,
-        ];
-        
-        let foundIds = [];
-        let foundNames = [];
-        
-        // Try to find employee IDs
-        for (const pattern of empCodePatterns) {
-            let match;
-            while ((match = pattern.exec(text)) !== null) {
-                if (match[1]) {
-                    let id = match[1].trim();
-                    // If it's just a number, prefix with PPRR
-                    if (/^\d+$/.test(id) && id.length >= 4 && id.length <= 6) {
-                        // Check if we already have a PPRR version
-                        const pprrId = `PPRR${id}`;
-                        if (!foundIds.includes(pprrId)) {
-                            foundIds.push(pprrId);
-                        }
-                    } else if (id.length >= 4) {
-                        // Clean the ID
-                        id = id.replace(/[^A-Z0-9]/g, '');
-                        if (id.length >= 4 && !foundIds.includes(id)) {
-                            foundIds.push(id);
-                        }
-                    }
-                }
-            }
+function extractEmpId(text) {
+    // Look for Emp Code pattern - keep EXACT match
+    // Pattern 1: "Emp Code" followed by number (like "Emp Code 12095")
+    const empCodeMatch = text.match(/Emp\s*Code[:.\s]*([0-9]{4,6})/i);
+    if (empCodeMatch) {
+        const id = empCodeMatch[1].trim();
+        if (id.length >= 4 && id.length <= 6) {
+            console.log(`✅ Found Emp Code: ${id}`);
+            return id;
         }
-        
-        // Try to find names
-        const namePattern = /Name\s+of\s+the\s+Employee\s*([A-Z\s]+?)(?=\s+No\s+of\s+Days|$)/gi;
-        let nameMatch;
-        while ((nameMatch = namePattern.exec(text)) !== null) {
-            let name = nameMatch[1].trim();
-            name = name.replace(/[^A-Za-z\s\.]/g, '');
-            if (name.length > 2 && !foundNames.includes(name)) {
-                foundNames.push(name);
-            }
-        }
-        
-        console.log(`📝 Found ${foundIds.length} IDs and ${foundNames.length} names in raw PDF data`);
-        
-        return { ids: foundIds, names: foundNames, rawText: text };
-    } catch (error) {
-        console.error('❌ Raw PDF extraction error:', error.message);
-        return { ids: [], names: [], rawText: '' };
     }
+    
+    // Pattern 2: "Emp Code" followed by PPRR + number
+    const empCodePprrMatch = text.match(/Emp\s*Code[:.\s]*(PPRR[0-9]+)/i);
+    if (empCodePprrMatch) {
+        let id = empCodePprrMatch[1].trim();
+        id = id.replace(/[^A-Z0-9]/g, '');
+        if (id.length >= 4) {
+            console.log(`✅ Found Emp Code with PPRR: ${id}`);
+            return id;
+        }
+    }
+    
+    // Pattern 3: "Employee Code" followed by number
+    const employeeCodeMatch = text.match(/Employee\s*Code[:.\s]*([0-9]{4,6})/i);
+    if (employeeCodeMatch) {
+        const id = employeeCodeMatch[1].trim();
+        if (id.length >= 4 && id.length <= 6) {
+            console.log(`✅ Found Employee Code: ${id}`);
+            return id;
+        }
+    }
+    
+    // Pattern 4: Just PPRR followed by number (without "Emp Code")
+    const pprrMatch = text.match(/(PPRR[0-9]+)/i);
+    if (pprrMatch) {
+        let id = pprrMatch[1].trim();
+        id = id.replace(/[^A-Z0-9]/g, '');
+        if (id.length >= 4) {
+            console.log(`✅ Found PPRR ID: ${id}`);
+            return id;
+        }
+    }
+    
+    // Pattern 5: TXIX format
+    const txixMatch = text.match(/(TXIX[0-9]+)/i);
+    if (txixMatch) {
+        let id = txixMatch[1].trim();
+        id = id.replace(/[^A-Z0-9]/g, '');
+        if (id.length >= 4) {
+            console.log(`✅ Found TXIX ID: ${id}`);
+            return id;
+        }
+    }
+    
+    // Pattern 6: T1UB format
+    const t1ubMatch = text.match(/(T1UB[0-9]+)/i);
+    if (t1ubMatch) {
+        let id = t1ubMatch[1].trim();
+        id = id.replace(/[^A-Z0-9]/g, '');
+        if (id.length >= 4) {
+            console.log(`✅ Found T1UB ID: ${id}`);
+            return id;
+        }
+    }
+    
+    // Pattern 7: Standalone number (like "12095" from your PDF)
+    const numericMatch = text.match(/\b([0-9]{4,6})\b/);
+    if (numericMatch) {
+        const id = numericMatch[1].trim();
+        if (id.length >= 4 && id.length <= 6) {
+            console.log(`✅ Found numeric ID: ${id}`);
+            return id;
+        }
+    }
+    
+    // Pattern 8: Fallback - any alphanumeric that looks like an ID
+    const fallbackMatch = text.match(/\b([A-Z]{2,4}[0-9]{4,6})\b/);
+    if (fallbackMatch) {
+        let id = fallbackMatch[1].trim();
+        id = id.replace(/[^A-Z0-9]/g, '');
+        if (id.length >= 4) {
+            console.log(`✅ Found fallback ID: ${id}`);
+            return id;
+        }
+    }
+    
+    return null;
 }
-
-// ============================================
-// EXTRACTION FUNCTIONS
-// ============================================
 
 function extractName(text) {
     const patterns = [
@@ -255,146 +275,33 @@ function extractName(text) {
         }
     }
     
-    const fallbackMatch = text.match(/([A-Z]{2,}(?:\s+[A-Z]{2,}){1,5})/);
-    if (fallbackMatch) {
-        let name = fallbackMatch[1].trim();
-        const stopWords = ['BASIC', 'HRA', 'ALLOWANCE', 'BONUS', 'LWF', 'UAN', 'ESIC', 'P TAX', 'TOTAL', 'GROSS', 'AMOUNT', 'PARTICULARS', 'EARNING', 'DEDUCTIONS', 'FIXED', 'RATE', 'BANK', 'TRANSFER', 'EXEMPTED', 'LOCATION', 'NOIDA', 'KHASRA', 'NEAR', 'BSES', 'OFFICE', 'VILLAGE', 'POST', 'BHARTHAL', 'DWARKA', 'SECTOR', 'NEW', 'DELHI', 'SUPERVISOR', 'SHIFT', 'INCHARGE', 'TEAM', 'LEADER', 'PICKER', 'LOADER', 'UNLOADER', 'EXECUTIVE'];
-        if (stopWords.some(w => name.includes(w))) {
-            return null;
-        }
-        return name;
-    }
-    
-    return null;
-}
-
-function extractEmpId(text) {
-    // PPRR pattern
-    const pprrMatch = text.match(/(PPRR[A-Z0-9]+)/i);
-    if (pprrMatch) {
-        let id = pprrMatch[1].trim().toUpperCase();
-        if (id.length >= 4 && id.startsWith('PPRR')) {
-            console.log(`✅ Found PPRR ID: ${id}`);
-            return id;
-        }
-    }
-    
-    // Emp Code with PPRR
-    const empCodeMatch = text.match(/Emp Code[:.\s]*(PPRR[A-Z0-9]+)/i);
-    if (empCodeMatch) {
-        let id = empCodeMatch[1].trim().toUpperCase();
-        if (id.length >= 4) {
-            console.log(`✅ Found Emp Code: ${id}`);
-            return id;
-        }
-    }
-    
-    // Employee Code with PPRR
-    const employeeCodeMatch = text.match(/Employee Code[:.\s]*(PPRR[A-Z0-9]+)/i);
-    if (employeeCodeMatch) {
-        let id = employeeCodeMatch[1].trim().toUpperCase();
-        if (id.length >= 4) {
-            console.log(`✅ Found Employee Code: ${id}`);
-            return id;
-        }
-    }
-    
-    // Generic PPRR pattern
-    const genericMatch = text.match(/\b(PPRR[A-Z0-9]+)\b/i);
-    if (genericMatch) {
-        let id = genericMatch[1].trim().toUpperCase();
-        if (id.length >= 4) {
-            console.log(`✅ Found PPRR (generic): ${id}`);
-            return id;
-        }
-    }
-    
-    // TXIX format
-    const txixMatch = text.match(/(TXIX[A-Z0-9]+)/i);
-    if (txixMatch) {
-        let id = txixMatch[1].trim().toUpperCase();
-        if (id.length >= 4) {
-            console.log(`✅ Found TXIX ID: ${id}`);
-            return id;
-        }
-    }
-    
-    // T1UB format
-    const t1ubMatch = text.match(/(T1UB[A-Z0-9]+)/i);
-    if (t1ubMatch) {
-        let id = t1ubMatch[1].trim().toUpperCase();
-        if (id.length >= 4) {
-            console.log(`✅ Found T1UB ID: ${id}`);
-            return id;
-        }
-    }
-    
-    // Numeric-only Emp Code
-    const numericMatch = text.match(/Emp Code[:.\s]*([0-9]{4,6})/i);
-    if (numericMatch) {
-        let num = numericMatch[1].trim();
-        if (num.length >= 4 && num.length <= 6) {
-            if (employeeData && employeeData.length > 0) {
-                for (const emp of employeeData) {
-                    const empNumeric = emp.empId.toUpperCase().replace(/^[A-Z]+/, '');
-                    if (empNumeric === num) {
-                        console.log(`✅ Matched numeric ID ${num} to existing employee ${emp.empId}`);
-                        return emp.empId.toUpperCase();
-                    }
-                }
-            }
-            console.log(`⚠️ Converting numeric ID ${num} to PPRR${num}`);
-            return `PPRR${num}`;
-        }
-    }
-    
-    // Fallback
-    const fallbackMatch = text.match(/\b([A-Z]{2,4}[0-9]{4,6})\b/);
-    if (fallbackMatch) {
-        let id = fallbackMatch[1].trim().toUpperCase();
-        id = id.replace(/[^A-Z0-9]/g, '');
-        if (id.length >= 4 && /[A-Z]/.test(id) && /[0-9]/.test(id)) {
-            console.log(`✅ Found fallback ID: ${id}`);
-            return id;
-        }
-    }
-    
     return null;
 }
 
 // ============================================
-// FIND EMPLOYEE - Matches by numeric part
+// FIND EMPLOYEE - Match by ID
 // ============================================
 
 function findEmployee(empId) {
     if (!empId) return null;
     
     empId = empId.toUpperCase().trim();
-    const numericPart = empId.replace(/^[A-Z]+/, '');
     
-    // 1. Try exact match
+    // Try exact match
     let found = employeeData.find(e => e.empId.toUpperCase() === empId);
     if (found) return found;
     
-    // 2. Match by numeric part
-    found = employeeData.find(e => {
-        const eNumeric = e.empId.toUpperCase().replace(/^[A-Z]+/, '');
-        return eNumeric === numericPart;
-    });
-    if (found) {
-        console.log(`✅ Matched ${empId} to ${found.empId} by numeric part`);
-        return found;
-    }
-    
-    // 3. Partial match
-    found = employeeData.find(e => {
-        const eId = e.empId.toUpperCase();
-        const eNumeric = eId.replace(/^[A-Z]+/, '');
-        return eNumeric.includes(numericPart) || numericPart.includes(eNumeric);
-    });
-    if (found) {
-        console.log(`✅ Matched ${empId} to ${found.empId} by partial match`);
-        return found;
+    // Try match by numeric part (for cases where one has PPRR and other doesn't)
+    const numericPart = empId.replace(/^[A-Z]+/, '');
+    if (numericPart && numericPart.length >= 4) {
+        found = employeeData.find(e => {
+            const eNumeric = e.empId.toUpperCase().replace(/^[A-Z]+/, '');
+            return eNumeric === numericPart;
+        });
+        if (found) {
+            console.log(`✅ Matched ${empId} to ${found.empId} by numeric part`);
+            return found;
+        }
     }
     
     return null;
@@ -549,7 +456,6 @@ app.get('/health', async (req, res) => {
     }
 });
 
-// Serve index.html
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
@@ -558,7 +464,6 @@ app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Error handling
 app.use((err, req, res, next) => {
     console.error('❌ Server error:', err);
     res.status(500).json({ error: 'Internal server error' });

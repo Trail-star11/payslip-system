@@ -129,7 +129,7 @@
         .settings-section { background: #f8fafc; padding: 1rem 1.5rem; border-radius: 16px; border: 1px solid #e2e8f0; margin-top: 1rem; }
         .pdf-count-badge { background: #2563eb; color: white; padding: 0.1rem 0.6rem; border-radius: 12px; font-size: 0.7rem; margin-left: 0.5rem; }
 
-        .missing-log { max-height: 300px; overflow-y: auto; background: #f8fafc; border-radius: 12px; border: 1px solid #e2e8f0; padding: 0.5rem; margin-top: 0.5rem; }
+        .missing-log { max-height: 400px; overflow-y: auto; background: #f8fafc; border-radius: 12px; border: 1px solid #e2e8f0; padding: 0.5rem; margin-top: 0.5rem; }
         .missing-log-item { padding: 0.4rem 0.6rem; border-bottom: 1px solid #e2e8f0; font-size: 0.85rem; display: flex; justify-content: space-between; align-items: center; }
         .missing-log-item .emp-id { font-weight: 600; color: #1e293b; }
         .missing-log-item .status { font-size: 0.75rem; }
@@ -575,35 +575,45 @@
             html += `<div style="font-size: 0.8rem; padding: 0.3rem 0.5rem; color: #475569;">
                 <strong>PDF Status (per file):</strong>`;
             data.pdfStats.forEach(pdf => {
-                // Each PDF shows its own correct count
-                const isComplete = pdf.missing === 0;
-                const status = isComplete ? '✅ Complete' : `⚠️ ${pdf.missing} missing`;
-                html += `<div style="padding: 0.2rem 0; display: flex; justify-content: space-between; align-items: center;">
+                // Get employees assigned to THIS PDF only
+                const assignedToThisPdf = data.employees.filter(emp => 
+                    emp.pdfFile === pdf.pdfName
+                );
+                const foundInThisPdf = assignedToThisPdf.filter(emp => 
+                    emp.pageNumber && emp.pageNumber > 0
+                );
+                const missingInThisPdf = assignedToThisPdf.length - foundInThisPdf.length;
+                
+                const isComplete = missingInThisPdf === 0;
+                const status = isComplete ? '✅ Complete' : `⚠️ ${missingInThisPdf} missing in this PDF`;
+                
+                html += `<div style="padding: 0.2rem 0; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e2e8f0;">
                     <span>📄 ${pdf.pdfName}</span>
-                    <span style="${isComplete ? 'color: #16a34a;' : 'color: #f59e0b;'}">${pdf.found}/${pdf.totalEmployeesOverall} found (${status})</span>
+                    <span style="${isComplete ? 'color: #16a34a;' : 'color: #f59e0b;'}">${foundInThisPdf.length}/${assignedToThisPdf.length} found (${status})</span>
                 </div>`;
             });
             html += `</div>`;
         }
 
-        // Missing employees list (only if there are truly missing ones)
+        // Missing employees list - show ALL (no truncation)
         if (data.missingEmployees && data.missingEmployees.length > 0) {
-            html += `<div style="font-weight: 600; padding: 0.3rem 0.5rem; color: #dc2626;">
+            html += `<div style="font-weight: 600; padding: 0.3rem 0.5rem; color: #dc2626; border-top: 1px solid #e2e8f0; margin-top: 0.5rem;">
                 ⚠️ Employees WITHOUT any payslip (${data.missingEmployees.length}):
             </div>`;
-            data.missingEmployees.slice(0, 20).forEach(emp => {
+            data.missingEmployees.forEach(emp => {
                 html += `<div class="missing-log-item">
                     <span class="emp-id">${emp.empId}</span>
                     <span>${emp.name || 'N/A'}</span>
                     <span class="status" style="color: #dc2626;">❌ No PDF assigned</span>
                 </div>`;
             });
-            if (data.missingEmployees.length > 20) {
-                html += `<div style="padding: 0.3rem 0.5rem; color: #94a3b8; text-align: center;">... and ${data.missingEmployees.length - 20} more</div>`;
-            }
-        } else {
+        } else if (data.totalEmployees > 0) {
             html += `<div style="padding: 0.5rem; color: #16a34a; text-align: center;">
                 ✅ All ${data.totalEmployees} employees have payslips assigned!
+            </div>`;
+        } else {
+            html += `<div style="padding: 0.5rem; color: #94a3b8; text-align: center;">
+                No employees uploaded yet.
             </div>`;
         }
 
@@ -643,7 +653,6 @@
                         }
                     }
                 }
-                // ⭐ FIXED: NO AUTO TEST MODE SYNC - Admin has full control
                 if (data.settings && data.settings.testMode !== undefined && !manualTestModeOverride) {
                     testModeToggle.checked = data.settings.testMode;
                     updateTestModeStatus();
@@ -887,7 +896,6 @@
         let html = `<table class="employee-table"><thead><tr><th>Emp ID</th><th>Name</th><th>PDF Found</th><th>Password</th><th>⬇️ Downloads</th></tr></thead><tbody>`;
         employeeData.forEach(emp => {
             const hasPdf = emp.pageNumber && emp.pdfFile && pdfDataStore[emp.pdfFile];
-            // ⭐ FIXED: Show PDF filename with page number
             const pdfStatus = hasPdf ? 
                 `<span class="badge badge-page">✅ ${emp.pdfFile} (Page ${emp.pageNumber})</span>` : 
                 emp.pageNumber ? `<span class="badge badge-not-found">⚠️ PDF not loaded (${emp.pdfFile || 'unknown'})</span>` :
@@ -1226,7 +1234,7 @@
     });
 
     // ============================================
-    // ⭐ FIXED: TEST MODE - FULL ADMIN CONTROL (NO AUTO-SYNC)
+    // TEST MODE - FULL ADMIN CONTROL
     // ============================================
 
     testModeToggle.addEventListener('change', function() {
@@ -1246,14 +1254,11 @@
             dummyPasswordDisplay.classList.remove('show');
             setAdminMsg(`🔒 Test Mode DISABLED - Admin controlled`, '');
         }
-        // Save the setting to server
         saveDataToServer(employeeData, null, { testMode: newState });
         setTimeout(() => {
             isTestModeChanging = false;
         }, 500);
     });
-
-    // ⭐ REMOVED: Auto-sync for test mode - Admin has full control
 
     // ============================================
     // USER LOGIN
@@ -1440,7 +1445,6 @@
         await loadDataFromServer(true);
         if (adminUnlocked) await loadMissingLog();
         
-        // ⭐ FIXED: No auto-sync, respect current toggle state
         if (!testModeToggle.checked) {
             testModeToggle.checked = false;
             updateTestModeStatus();

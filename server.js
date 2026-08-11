@@ -18,13 +18,13 @@ const COLLECTION_NAME = 'payslip_data';
 let db = null;
 let collection = null;
 let dataCache = null;
-let employeeData = []; // Global reference for matching
+let employeeData = [];
 
 console.log('🚀 Starting server...');
 console.log('🔒 Admin password is set from environment variables');
 
 // ============================================
-// ✅ MIDDLEWARE - MUST come BEFORE routes
+// MIDDLEWARE - MUST come BEFORE routes
 // ============================================
 
 app.use(express.json({ limit: '500mb' }));
@@ -155,7 +155,75 @@ async function initializeData() {
 }
 
 // ============================================
-// ⭐ FIXED: EXTRACTION FUNCTIONS
+// ⭐ FIXED: RAW TEXT EXTRACTION FROM PDF BYTES
+// ============================================
+
+function extractTextFromPdfBytes(pdfBytes) {
+    try {
+        // Convert bytes to string
+        const decoder = new TextDecoder('utf-8', { fatal: false });
+        const text = decoder.decode(pdfBytes);
+        
+        // Look for Emp Code patterns in raw PDF data
+        const empCodePatterns = [
+            /Emp\s*Code\s*(\d{4,6})/gi,
+            /Emp\s*Code\s*(PPRR\d+)/gi,
+            /Emp\s*Code\s*(TXIX\d+)/gi,
+            /Emp\s*Code\s*(T1UB\d+)/gi,
+            /PPRR(\d{4,6})/gi,
+            /TXIX(\d{4,6})/gi,
+            /T1UB(\d{4,6})/gi,
+        ];
+        
+        let foundIds = [];
+        let foundNames = [];
+        
+        // Try to find employee IDs
+        for (const pattern of empCodePatterns) {
+            let match;
+            while ((match = pattern.exec(text)) !== null) {
+                if (match[1]) {
+                    let id = match[1].trim();
+                    // If it's just a number, prefix with PPRR
+                    if (/^\d+$/.test(id) && id.length >= 4 && id.length <= 6) {
+                        // Check if we already have a PPRR version
+                        const pprrId = `PPRR${id}`;
+                        if (!foundIds.includes(pprrId)) {
+                            foundIds.push(pprrId);
+                        }
+                    } else if (id.length >= 4) {
+                        // Clean the ID
+                        id = id.replace(/[^A-Z0-9]/g, '');
+                        if (id.length >= 4 && !foundIds.includes(id)) {
+                            foundIds.push(id);
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Try to find names
+        const namePattern = /Name\s+of\s+the\s+Employee\s*([A-Z\s]+?)(?=\s+No\s+of\s+Days|$)/gi;
+        let nameMatch;
+        while ((nameMatch = namePattern.exec(text)) !== null) {
+            let name = nameMatch[1].trim();
+            name = name.replace(/[^A-Za-z\s\.]/g, '');
+            if (name.length > 2 && !foundNames.includes(name)) {
+                foundNames.push(name);
+            }
+        }
+        
+        console.log(`📝 Found ${foundIds.length} IDs and ${foundNames.length} names in raw PDF data`);
+        
+        return { ids: foundIds, names: foundNames, rawText: text };
+    } catch (error) {
+        console.error('❌ Raw PDF extraction error:', error.message);
+        return { ids: [], names: [], rawText: '' };
+    }
+}
+
+// ============================================
+// EXTRACTION FUNCTIONS
 // ============================================
 
 function extractName(text) {
@@ -201,7 +269,7 @@ function extractName(text) {
 }
 
 function extractEmpId(text) {
-    // 🔥 PRIORITY: Look for PPRR pattern FIRST (your most common format)
+    // PPRR pattern
     const pprrMatch = text.match(/(PPRR[A-Z0-9]+)/i);
     if (pprrMatch) {
         let id = pprrMatch[1].trim().toUpperCase();
@@ -211,7 +279,7 @@ function extractEmpId(text) {
         }
     }
     
-    // Look for Emp Code with PPRR
+    // Emp Code with PPRR
     const empCodeMatch = text.match(/Emp Code[:.\s]*(PPRR[A-Z0-9]+)/i);
     if (empCodeMatch) {
         let id = empCodeMatch[1].trim().toUpperCase();
@@ -221,7 +289,7 @@ function extractEmpId(text) {
         }
     }
     
-    // Look for Employee Code with PPRR
+    // Employee Code with PPRR
     const employeeCodeMatch = text.match(/Employee Code[:.\s]*(PPRR[A-Z0-9]+)/i);
     if (employeeCodeMatch) {
         let id = employeeCodeMatch[1].trim().toUpperCase();
@@ -231,7 +299,7 @@ function extractEmpId(text) {
         }
     }
     
-    // Generic PPRR pattern (fallback)
+    // Generic PPRR pattern
     const genericMatch = text.match(/\b(PPRR[A-Z0-9]+)\b/i);
     if (genericMatch) {
         let id = genericMatch[1].trim().toUpperCase();
@@ -241,7 +309,7 @@ function extractEmpId(text) {
         }
     }
     
-    // TXIX format (older format)
+    // TXIX format
     const txixMatch = text.match(/(TXIX[A-Z0-9]+)/i);
     if (txixMatch) {
         let id = txixMatch[1].trim().toUpperCase();
@@ -261,13 +329,11 @@ function extractEmpId(text) {
         }
     }
     
-    // Look for numeric-only Emp Code (like "11906" from your PDF)
-    // Then convert to PPRR format if it's a valid ID
+    // Numeric-only Emp Code
     const numericMatch = text.match(/Emp Code[:.\s]*([0-9]{4,6})/i);
     if (numericMatch) {
         let num = numericMatch[1].trim();
         if (num.length >= 4 && num.length <= 6) {
-            // Check if this numeric ID exists in our data with any prefix
             if (employeeData && employeeData.length > 0) {
                 for (const emp of employeeData) {
                     const empNumeric = emp.empId.toUpperCase().replace(/^[A-Z]+/, '');
@@ -277,13 +343,12 @@ function extractEmpId(text) {
                     }
                 }
             }
-            // If no match found, use PPRR as default
             console.log(`⚠️ Converting numeric ID ${num} to PPRR${num}`);
             return `PPRR${num}`;
         }
     }
     
-    // Fallback: Look for any 4+ char alphanumeric that looks like an ID
+    // Fallback
     const fallbackMatch = text.match(/\b([A-Z]{2,4}[0-9]{4,6})\b/);
     if (fallbackMatch) {
         let id = fallbackMatch[1].trim().toUpperCase();
@@ -294,27 +359,24 @@ function extractEmpId(text) {
         }
     }
     
-    console.log(`❌ No ID found in text`);
     return null;
 }
 
 // ============================================
-// ⭐ FIXED: FIND EMPLOYEE - Matches by numeric part
+// FIND EMPLOYEE - Matches by numeric part
 // ============================================
 
 function findEmployee(empId) {
     if (!empId) return null;
     
     empId = empId.toUpperCase().trim();
-    
-    // Extract numeric part (e.g., "11906" from "PPRR11906" or "TXIX11906")
     const numericPart = empId.replace(/^[A-Z]+/, '');
     
-    // 1. Try exact match first
+    // 1. Try exact match
     let found = employeeData.find(e => e.empId.toUpperCase() === empId);
     if (found) return found;
     
-    // 2. Try matching by numeric part (TXIX11906 vs PPRR11906)
+    // 2. Match by numeric part
     found = employeeData.find(e => {
         const eNumeric = e.empId.toUpperCase().replace(/^[A-Z]+/, '');
         return eNumeric === numericPart;
@@ -324,7 +386,7 @@ function findEmployee(empId) {
         return found;
     }
     
-    // 3. Try partial match
+    // 3. Partial match
     found = employeeData.find(e => {
         const eId = e.empId.toUpperCase();
         const eNumeric = eId.replace(/^[A-Z]+/, '');
@@ -345,8 +407,6 @@ function findEmployee(empId) {
 app.post('/api/admin/login', (req, res) => {
     try {
         console.log('🔐 Admin login request received');
-        console.log('📦 Request body:', req.body);
-        
         const password = req.body && req.body.password ? req.body.password : null;
         
         if (!password) {
@@ -356,8 +416,6 @@ app.post('/api/admin/login', (req, res) => {
                 message: 'Password is required' 
             });
         }
-        
-        console.log('🔐 Password received, checking...');
         
         if (password === ADMIN_PASSWORD) {
             const expiry = Date.now() + (24 * 60 * 60 * 1000);

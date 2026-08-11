@@ -159,78 +159,52 @@ async function initializeData() {
 // ============================================
 
 function extractEmpId(text) {
-    // Pattern 1: "Emp Code" followed by number (like "Emp Code 12095")
     const empCodeMatch = text.match(/Emp\s*Code[:.\s]*([0-9]{4,6})/i);
     if (empCodeMatch) {
         const id = empCodeMatch[1].trim();
         if (id.length >= 4 && id.length <= 6) {
-            console.log(`✅ Found Emp Code: ${id}`);
             return id;
         }
     }
     
-    // Pattern 2: "Emp Code" followed by PPRR + number
     const empCodePprrMatch = text.match(/Emp\s*Code[:.\s]*(PPRR[0-9]+)/i);
     if (empCodePprrMatch) {
         let id = empCodePprrMatch[1].trim();
         id = id.replace(/[^A-Z0-9]/g, '');
-        if (id.length >= 4) {
-            console.log(`✅ Found Emp Code with PPRR: ${id}`);
-            return id;
-        }
+        if (id.length >= 4) return id;
     }
     
-    // Pattern 3: "Employee Code" followed by number
     const employeeCodeMatch = text.match(/Employee\s*Code[:.\s]*([0-9]{4,6})/i);
     if (employeeCodeMatch) {
         const id = employeeCodeMatch[1].trim();
-        if (id.length >= 4 && id.length <= 6) {
-            console.log(`✅ Found Employee Code: ${id}`);
-            return id;
-        }
+        if (id.length >= 4 && id.length <= 6) return id;
     }
     
-    // Pattern 4: Just PPRR followed by number
     const pprrMatch = text.match(/(PPRR[0-9]+)/i);
     if (pprrMatch) {
         let id = pprrMatch[1].trim();
         id = id.replace(/[^A-Z0-9]/g, '');
-        if (id.length >= 4) {
-            console.log(`✅ Found PPRR ID: ${id}`);
-            return id;
-        }
+        if (id.length >= 4) return id;
     }
     
-    // Pattern 5: Standalone number (like "12095")
     const numericMatch = text.match(/\b([0-9]{4,6})\b/);
     if (numericMatch) {
         const id = numericMatch[1].trim();
-        if (id.length >= 4 && id.length <= 6) {
-            console.log(`✅ Found numeric ID: ${id}`);
-            return id;
-        }
+        if (id.length >= 4 && id.length <= 6) return id;
     }
     
-    // Pattern 6: TXIX format
     const txixMatch = text.match(/(TXIX[0-9]+)/i);
     if (txixMatch) {
         let id = txixMatch[1].trim();
         id = id.replace(/[^A-Z0-9]/g, '');
-        if (id.length >= 4) {
-            console.log(`✅ Found TXIX ID: ${id}`);
-            return id;
-        }
+        if (id.length >= 4) return id;
     }
     
-    // Pattern 7: T1UB format
     const t1ubMatch = text.match(/(T1UB[0-9]+)/i);
     if (t1ubMatch) {
         let id = t1ubMatch[1].trim();
         id = id.replace(/[^A-Z0-9]/g, '');
-        if (id.length >= 4) {
-            console.log(`✅ Found T1UB ID: ${id}`);
-            return id;
-        }
+        if (id.length >= 4) return id;
     }
     
     return null;
@@ -264,36 +238,24 @@ function extractName(text) {
             }
         }
     }
-    
     return null;
 }
 
-// ============================================
-// FIND EMPLOYEE - Match by numeric part
-// ============================================
-
 function findEmployee(empId) {
     if (!empId) return null;
-    
     empId = empId.toUpperCase().trim();
     
-    // Try exact match
     let found = employeeData.find(e => e.empId.toUpperCase() === empId);
     if (found) return found;
     
-    // Try match by numeric part (for cases where one has PPRR and other doesn't)
     const numericPart = empId.replace(/^[A-Z]+/, '');
     if (numericPart && numericPart.length >= 4) {
         found = employeeData.find(e => {
             const eNumeric = e.empId.toUpperCase().replace(/^[A-Z]+/, '');
             return eNumeric === numericPart;
         });
-        if (found) {
-            console.log(`✅ Matched ${empId} to ${found.empId} by numeric part`);
-            return found;
-        }
+        if (found) return found;
     }
-    
     return null;
 }
 
@@ -307,21 +269,17 @@ app.post('/api/admin/login', (req, res) => {
         const password = req.body && req.body.password ? req.body.password : null;
         
         if (!password) {
-            console.log('❌ No password provided');
             return res.status(400).json({ 
                 success: false, 
                 message: 'Password is required' 
             });
         }
         
-        console.log('🔐 Password received, checking...');
-        
         if (password === ADMIN_PASSWORD) {
             const expiry = Date.now() + (24 * 60 * 60 * 1000);
             const tokenData = `${expiry}:${password}`;
             const token = Buffer.from(tokenData).toString('base64');
             
-            console.log('✅ Admin login successful');
             res.json({ 
                 success: true, 
                 token: token,
@@ -329,7 +287,6 @@ app.post('/api/admin/login', (req, res) => {
                 expiresIn: '24 hours'
             });
         } else {
-            console.log('❌ Admin login failed: Invalid password');
             res.status(401).json({ 
                 success: false, 
                 message: 'Invalid password' 
@@ -347,30 +304,122 @@ app.post('/api/admin/login', (req, res) => {
 app.post('/api/admin/verify', (req, res) => {
     try {
         const token = req.body && req.body.token ? req.body.token : null;
-        
         if (!token) {
             return res.json({ success: false, message: 'No token provided' });
         }
-        
         try {
             const decoded = Buffer.from(token, 'base64').toString();
             const [expiry, password] = decoded.split(':');
-            
             if (Date.now() > parseInt(expiry)) {
                 return res.json({ success: false, message: 'Token expired' });
             }
-            
             if (password === ADMIN_PASSWORD) {
                 return res.json({ success: true, message: 'Token valid' });
             }
         } catch (e) {
             return res.json({ success: false, message: 'Invalid token' });
         }
-        
         res.json({ success: false, message: 'Invalid token' });
     } catch (error) {
         console.error('❌ Verify error:', error);
         res.json({ success: false, message: 'Server error' });
+    }
+});
+
+// ============================================
+// ⭐ NEW: DOWNLOAD TRACKING
+// ============================================
+
+app.post('/api/track-download', async (req, res) => {
+    try {
+        const { empId } = req.body;
+        if (!empId) {
+            return res.status(400).json({ error: 'Employee ID required' });
+        }
+        
+        // Get current data
+        const data = await loadDataFromMongoDB();
+        if (!data || !data.employees) {
+            return res.status(404).json({ error: 'No data found' });
+        }
+        
+        // Find and update the employee
+        const employee = data.employees.find(e => e.empId === empId || 
+            e.empId.replace(/^[A-Z]+/, '') === empId.replace(/^[A-Z]+/, ''));
+        
+        if (!employee) {
+            return res.status(404).json({ error: 'Employee not found' });
+        }
+        
+        // Increment download count
+        employee.downloadCount = (employee.downloadCount || 0) + 1;
+        employee.lastDownload = new Date().toISOString();
+        
+        // Save back to MongoDB
+        await saveDataToMongoDB(data);
+        
+        res.json({ 
+            success: true, 
+            downloadCount: employee.downloadCount,
+            lastDownload: employee.lastDownload
+        });
+    } catch (error) {
+        console.error('❌ Track download error:', error);
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// ============================================
+// ⭐ NEW: GET MISSING EMPLOYEES LOG
+// ============================================
+
+app.get('/api/missing-payslips', async (req, res) => {
+    try {
+        const data = await loadDataFromMongoDB();
+        if (!data || !data.employees) {
+            return res.json({ employees: [], pdfs: [] });
+        }
+        
+        // Get all PDF filenames
+        const pdfFiles = data.pdfs ? Object.keys(data.pdfs) : [];
+        
+        // Find employees without payslips
+        const missingEmployees = data.employees.filter(emp => {
+            return !emp.pageNumber || !emp.pdfFile || !pdfFiles.includes(emp.pdfFile);
+        });
+        
+        // Group by PDF file to show which employees are missing from which PDF
+        const pdfSummary = pdfFiles.map(pdfName => {
+            const employeesInPdf = data.employees.filter(emp => 
+                emp.pdfFile === pdfName && emp.pageNumber
+            );
+            const employeesMissing = data.employees.filter(emp => 
+                (!emp.pageNumber || !emp.pdfFile || emp.pdfFile !== pdfName) && 
+                !data.employees.some(e => e.empId === emp.empId && e.pdfFile === pdfName && e.pageNumber)
+            );
+            return {
+                pdfName: pdfName,
+                totalEmployees: data.employees.length,
+                foundInPdf: employeesInPdf.length,
+                missingInPdf: data.employees.length - employeesInPdf.length,
+                sampleMissing: employeesMissing.slice(0, 10).map(e => e.empId)
+            };
+        });
+        
+        res.json({
+            totalEmployees: data.employees.length,
+            totalWithPayslip: data.employees.filter(e => e.pageNumber && e.pdfFile && pdfFiles.includes(e.pdfFile)).length,
+            missingEmployees: missingEmployees.map(e => ({
+                empId: e.empId,
+                name: e.name,
+                pageNumber: e.pageNumber || 'Not found',
+                pdfFile: e.pdfFile || 'Not assigned'
+            })),
+            pdfSummary: pdfSummary
+        });
+    } catch (error) {
+        console.error('❌ Missing payslips error:', error);
+        res.status(500).json({ error: 'Server error' });
     }
 });
 

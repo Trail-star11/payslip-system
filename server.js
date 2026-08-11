@@ -14,9 +14,11 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://trail_db_user:ZFjmUOMVSdatCOsq@cluster0.h1pqrer.mongodb.net/?retryWrites=true&w=majority';
 const DB_NAME = process.env.DB_NAME || 'payslip_system';
 const COLLECTION_NAME = 'payslip_data';
+const PDF_COLLECTION_NAME = 'payslip_pdfs';
 
 let db = null;
 let collection = null;
+let pdfCollection = null;
 let dataCache = null;
 let employeeData = [];
 
@@ -61,10 +63,12 @@ async function connectToMongoDB() {
         
         db = client.db(DB_NAME);
         collection = db.collection(COLLECTION_NAME);
+        pdfCollection = db.collection(PDF_COLLECTION_NAME);
         
         try {
             await collection.createIndex({ 'employees.empId': 1 });
-            console.log('✅ Index created on empId');
+            await pdfCollection.createIndex({ _id: 1 });
+            console.log('✅ Indexes created');
         } catch (e) {
             console.log('⚠️ Index may already exist:', e.message);
         }
@@ -73,6 +77,87 @@ async function connectToMongoDB() {
     } catch (error) {
         console.error('❌ MongoDB connection failed:', error.message);
         console.log('⚠️ Running with local storage only');
+        return false;
+    }
+}
+
+// ============================================
+// PDF STORAGE FUNCTIONS (FIXED)
+// ============================================
+
+async function savePdfToMongoDB(filename, pdfData) {
+    try {
+        if (!pdfCollection) {
+            console.log('⚠️ No MongoDB connection, skipping PDF save');
+            return false;
+        }
+        
+        // Store each PDF as a separate document
+        await pdfCollection.updateOne(
+            { _id: filename },
+            { 
+                $set: { 
+                    bytes: pdfData.bytes,
+                    pages: pdfData.pages || 0,
+                    size: pdfData.bytes ? pdfData.bytes.length : 0,
+                    lastUpdated: new Date().toISOString()
+                }
+            },
+            { upsert: true }
+        );
+        
+        console.log(`✅ PDF saved: ${filename} (${pdfData.bytes ? (pdfData.bytes.length/1024/1024).toFixed(2) : 0} MB)`);
+        return true;
+    } catch (error) {
+        console.error(`❌ Error saving PDF ${filename}:`, error.message);
+        return false;
+    }
+}
+
+async function loadPdfFromMongoDB(filename) {
+    try {
+        if (!pdfCollection) return null;
+        const result = await pdfCollection.findOne({ _id: filename });
+        if (result) {
+            return {
+                bytes: result.bytes,
+                pages: result.pages || 0
+            };
+        }
+        return null;
+    } catch (error) {
+        console.error(`❌ Error loading PDF ${filename}:`, error.message);
+        return null;
+    }
+}
+
+async function loadAllPdfsFromMongoDB() {
+    try {
+        if (!pdfCollection) return {};
+        const pdfs = await pdfCollection.find({}).toArray();
+        const result = {};
+        pdfs.forEach(pdf => {
+            result[pdf._id] = {
+                bytes: pdf.bytes,
+                pages: pdf.pages || 0
+            };
+        });
+        console.log(`✅ Loaded ${Object.keys(result).length} PDFs from MongoDB`);
+        return result;
+    } catch (error) {
+        console.error('❌ Error loading PDFs:', error.message);
+        return {};
+    }
+}
+
+async function deletePdfFromMongoDB(filename) {
+    try {
+        if (!pdfCollection) return false;
+        await pdfCollection.deleteOne({ _id: filename });
+        console.log(`✅ PDF deleted: ${filename}`);
+        return true;
+    } catch (error) {
+        console.error(`❌ Error deleting PDF ${filename}:`, error.message);
         return false;
     }
 }
@@ -88,7 +173,7 @@ async function loadDataFromMongoDB() {
         if (data) {
             delete data._id;
             employeeData = data.employees || [];
-            console.log(`✅ Data loaded from MongoDB: ${employeeData.length} employees, ${data.pdfs ? Object.keys(data.pdfs).length : 0} PDFs`);
+            console.log(`✅ Data loaded from MongoDB: ${employeeData.length} employees`);
             return data;
         }
         return null;
@@ -107,17 +192,31 @@ async function saveDataToMongoDB(data) {
             return false;
         }
         
-        data.lastUpdated = new Date().toISOString();
-        delete data._id;
+        // ⭐ FIX: Save ONLY employee data to main collection (NO PDFs)
+        // PDFs are saved separately in the pdfs collection
+        const employeeDataToSave = {
+            employees: data.employees || [],
+            settings: data.settings || { testMode: false },
+            lastUpdated: new Date().toISOString()
+        };
         
         await collection.updateOne(
             { _id: 'payslip_data' },
-            { $set: data },
+            { $set: employeeDataToSave },
             { upsert: true }
         );
         
+        // ⭐ Save PDFs to their own collection (each as separate document)
+        if (data.pdfs) {
+            for (const [filename, pdfData] of Object.entries(data.pdfs)) {
+                if (pdfData.bytes) {
+                    await savePdfToMongoDB(filename, pdfData);
+                }
+            }
+        }
+        
         employeeData = data.employees || [];
-        console.log(`✅ Data saved to MongoDB: ${employeeData.length} employees, ${data.pdfs ? Object.keys(data.pdfs).length : 0} PDFs`);
+        console.log(`✅ Data saved to MongoDB: ${employeeData.length} employees`);
         dataCache = data;
         return true;
     } catch (error) {
@@ -127,20 +226,26 @@ async function saveDataToMongoDB(data) {
 }
 
 async function initializeData() {
+    // Load employee data
     let data = await loadDataFromMongoDB();
+    
+    // Load PDFs separately
+    const pdfs = await loadAllPdfsFromMongoDB();
     
     if (data) {
         if (!data.settings) data.settings = { testMode: false };
-        if (!data.pdfs) data.pdfs = {};
         if (!data.employees) data.employees = [];
+        // Attach PDFs
+        data.pdfs = pdfs;
         dataCache = data;
         employeeData = data.employees || [];
+        console.log(`✅ Data initialized: ${employeeData.length} employees, ${Object.keys(pdfs).length} PDFs`);
         return data;
     }
     
     const initialData = {
         employees: [],
-        pdfs: {},
+        pdfs: pdfs,
         settings: { testMode: false },
         lastUpdated: new Date().toISOString()
     };
@@ -344,7 +449,7 @@ app.post('/api/track-download', async (req, res) => {
 });
 
 // ============================================
-// ⭐ FIXED: GET MISSING PAYSLIPS LOG
+// MISSING PAYSLIPS LOG
 // ============================================
 
 app.get('/api/missing-payslips', async (req, res) => {
@@ -354,17 +459,14 @@ app.get('/api/missing-payslips', async (req, res) => {
             return res.json({ employees: [], pdfs: [] });
         }
         
-        // Get all PDF filenames
         const pdfFiles = data.pdfs ? Object.keys(data.pdfs) : [];
         
         // Count employees per PDF file
         const pdfStats = pdfFiles.map(pdfName => {
-            // Employees found in this PDF
             const foundInPdf = data.employees.filter(emp => 
                 emp.pdfFile === pdfName && emp.pageNumber
             );
             
-            // Employees NOT found in this PDF (but exist in other PDFs or no PDF)
             const notFoundInPdf = data.employees.filter(emp => 
                 emp.pdfFile !== pdfName || !emp.pageNumber
             );
@@ -380,7 +482,6 @@ app.get('/api/missing-payslips', async (req, res) => {
             };
         });
         
-        // Find employees without ANY payslip
         const missingEmployees = data.employees.filter(emp => {
             return !emp.pageNumber || !emp.pdfFile || !pdfFiles.includes(emp.pdfFile);
         });
@@ -410,6 +511,9 @@ app.get('/api/data', async (req, res) => {
     try {
         const data = await loadDataFromMongoDB();
         if (data) {
+            // Also load PDFs
+            const pdfs = await loadAllPdfsFromMongoDB();
+            data.pdfs = pdfs;
             dataCache = data;
             employeeData = data.employees || [];
             res.json(data);
@@ -454,12 +558,13 @@ app.post('/api/data', async (req, res) => {
 app.get('/health', async (req, res) => {
     try {
         const data = await loadDataFromMongoDB();
+        const pdfs = await loadAllPdfsFromMongoDB();
         const mongodbConnected = !!collection;
         res.json({
             status: 'OK',
             timestamp: new Date().toISOString(),
             recordCount: data ? data.employees.length : 0,
-            pdfCount: data ? Object.keys(data.pdfs).length : 0,
+            pdfCount: Object.keys(pdfs).length,
             testMode: data ? data.settings?.testMode : false,
             storageType: mongodbConnected ? 'MongoDB Atlas (Free Tier) ✅' : 'Local (ephemeral) ⚠️',
             mongodbConnected: mongodbConnected,
